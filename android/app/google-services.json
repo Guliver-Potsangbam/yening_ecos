@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "586445028287",
+    "project_id": "yening-ecos-development",
+    "storage_bucket": "yening-ecos-development.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:586445028287:android:e12b108e2f8cac4ee37f0a",
+        "android_client_info": {
+          "package_name": "com.yeningtechnology.yeningecos"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyC7QVGPiADnfGMLQslT5RUTva7ejcNPTMo"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

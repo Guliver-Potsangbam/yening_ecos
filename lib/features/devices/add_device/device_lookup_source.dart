@@ -1,0 +1,1 @@
+enum DeviceLookupSource { qr, manual }

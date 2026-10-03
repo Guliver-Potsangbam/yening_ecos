@@ -1,0 +1,44 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    match /users/{userId} {
+
+      allow create: if request.auth != null
+                    && request.auth.uid == userId
+                    && request.resource.data.email == request.auth.token.email;
+
+      allow read: if request.auth != null
+                  && request.auth.uid == userId;
+
+      allow update: if request.auth != null
+                    && request.auth.uid == userId
+                    && request.resource.data.email == resource.data.email;
+
+      allow delete: if false;
+
+      match /notificationTokens/{installationId} {
+
+        allow create: if request.auth != null
+                      && request.auth.uid == userId
+                      && request.resource.data.token is string
+                      && request.resource.data.platform is string;
+
+        allow update: if request.auth != null
+                      && request.auth.uid == userId
+                      && request.resource.data.token is string
+                      && request.resource.data.platform is string;
+
+        allow delete: if request.auth != null
+                      && request.auth.uid == userId;
+
+        allow read: if false;
+      }
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

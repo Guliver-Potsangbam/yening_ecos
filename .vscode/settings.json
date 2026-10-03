@@ -1,0 +1,8 @@
+{
+    "[python]": {
+        "editor.detectIndentation": true
+    },
+    "editor.snippetSuggestions": "top",
+    "vscode-pets.petSize": "medium",
+    "vscode-pets.petColor": "lightbrown"
+}
