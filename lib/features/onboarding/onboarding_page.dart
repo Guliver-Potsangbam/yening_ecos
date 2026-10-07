@@ -4,7 +4,7 @@ import 'data/onboarding_storage.dart';
 
 import '../auth/login_page.dart';
 import '../auth/widgets/auth_gate.dart';
-import '../home/home_page.dart';
+import '../../app/navigation/main_navigation_shell.dart';
 
 class OnboardingPage extends StatefulWidget {
   const OnboardingPage({super.key});
@@ -59,7 +59,7 @@ class _OnboardingPageState extends State<OnboardingPage> {
     Navigator.of(context).pushReplacement(
       MaterialPageRoute(
         builder: (_) => AuthGate(
-          authenticatedBuilder: (_) => const HomePage(),
+          authenticatedBuilder: (_) => const MainNavigationShell(),
           unauthenticatedBuilder: (_) => const LoginPage(),
         ),
       ),

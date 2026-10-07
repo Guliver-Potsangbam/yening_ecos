@@ -2,9 +2,9 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import 'package:yening_ecos/app/navigation/main_navigation_shell.dart';
 import 'package:yening_ecos/features/auth/login_page.dart';
 import 'package:yening_ecos/features/auth/widgets/auth_gate.dart';
-import 'package:yening_ecos/features/home/home_page.dart';
 import 'package:yening_ecos/features/onboarding/data/onboarding_storage.dart';
 import 'package:yening_ecos/features/onboarding/onboarding_page.dart';
 import 'package:yening_ecos/widgets/splash_animation.dart';
@@ -74,7 +74,7 @@ class _SplashPageState extends State<SplashPage> with TickerProviderStateMixin {
     Navigator.of(context).pushReplacement(
       MaterialPageRoute(
         builder: (_) => AuthGate(
-          authenticatedBuilder: (_) => const HomePage(),
+          authenticatedBuilder: (_) => const MainNavigationShell(),
           unauthenticatedBuilder: (_) => const LoginPage(),
         ),
       ),
@@ -85,12 +85,14 @@ class _SplashPageState extends State<SplashPage> with TickerProviderStateMixin {
   void dispose() {
     _fadeController.dispose();
     _scaleController.dispose();
+
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
+
     final textTheme = Theme.of(context).textTheme;
 
     return Scaffold(

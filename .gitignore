@@ -46,3 +46,7 @@ app.*.map.json
 
 # Widget Preview related
 .widget_preview/
+
+# Private ready-made ESP32 bundle (contains user-supplied device credentials).
+/firmware/esp32/main/firebase_secrets.h
+/firmware/esp32/yening_esp32_ready.zip

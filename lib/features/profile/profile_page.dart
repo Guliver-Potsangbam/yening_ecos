@@ -1,256 +1,340 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
-import '../auth/models/user_profile.dart';
 import '../auth/services/auth_service.dart';
-import '../auth/services/user_profile_service.dart';
+import '../../core/ui/app_snackbar.dart';
+import 'data/profile_service.dart';
 import 'edit_profile_page.dart';
+import 'widgets/profile_header.dart';
+import 'widgets/profile_info_tile.dart';
 
-class ProfilePage extends StatefulWidget {
-  const ProfilePage({super.key});
+class ProfilePage extends StatelessWidget {
+  ProfilePage({
+    super.key,
+    ProfileService? profileService,
+    FirebaseAuth? auth,
+    AuthService? authService,
+  }) : _profileService = profileService ?? ProfileService(),
+       _auth = auth ?? FirebaseAuth.instance,
+       _authService = authService ?? AuthService();
 
-  @override
-  State<ProfilePage> createState() => _ProfilePageState();
-}
+  final ProfileService _profileService;
+  final FirebaseAuth _auth;
+  final AuthService _authService;
 
-class _ProfilePageState extends State<ProfilePage> {
-  final _authService = AuthService();
-  final _userProfileService = UserProfileService();
-
-  bool _isSigningOut = false;
-
-  Future<void> _editProfile() async {
-    final updated = await Navigator.of(context)
-        .push<bool>(MaterialPageRoute(builder: (_) => const EditProfilePage()));
-
-    if (!mounted || updated != true) {
-      return;
-    }
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Profile updated successfully.')),
+  void _openEditProfile(BuildContext context) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => EditProfilePage(profileService: _profileService),
+      ),
     );
   }
 
-  Future<void> _signOut() async {
-    if (_isSigningOut) {
+  Future<void> _signOut(BuildContext context) async {
+    final shouldSignOut =
+        await showDialog<bool>(
+          context: context,
+          builder: (dialogContext) {
+            return AlertDialog(
+              title: const Text('Sign out?'),
+              content: const Text(
+                'You will need to sign in again to access your Yening Ecos account.',
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () {
+                    Navigator.of(dialogContext).pop(false);
+                  },
+                  child: const Text('Cancel'),
+                ),
+                FilledButton(
+                  onPressed: () {
+                    Navigator.of(dialogContext).pop(true);
+                  },
+                  child: const Text('Sign out'),
+                ),
+              ],
+            );
+          },
+        ) ??
+        false;
+
+    if (!shouldSignOut) {
       return;
     }
 
-    setState(() {
-      _isSigningOut = true;
-    });
-
     try {
       await _authService.signOut();
-    } on Exception catch (e) {
-      if (!mounted) {
+    } catch (_) {
+      if (!context.mounted) {
         return;
       }
 
-      setState(() {
-        _isSigningOut = false;
-      });
-
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('Unable to sign out: $e')));
+      AppSnackBar.showMessage(context, 'Unable to sign out. Please try again.');
     }
-  }
-
-  String _initials(String? displayName, String email) {
-    final name = displayName?.trim() ?? '';
-
-    if (name.isNotEmpty) {
-      final parts = name
-          .split(RegExp(r'\s+'))
-          .where((part) => part.isNotEmpty)
-          .toList();
-
-      if (parts.length >= 2) {
-        return '${parts.first[0]}${parts.last[0]}'.toUpperCase();
-      }
-
-      return parts.first[0].toUpperCase();
-    }
-
-    if (email.isNotEmpty) {
-      return email[0].toUpperCase();
-    }
-
-    return '?';
   }
 
   @override
   Widget build(BuildContext context) {
-    final user = _authService.currentUser;
+    final user = _auth.currentUser;
 
     if (user == null) {
-      return const SizedBox.shrink();
+      return const Scaffold(
+        body: Center(child: Text('No authenticated user found.')),
+      );
     }
 
-    return StreamBuilder<UserProfile?>(
-      stream: _userProfileService.watchProfile(user.uid),
-      builder: (context, snapshot) {
-        if (snapshot.hasError) {
-          return Center(
-            child: Padding(
-              padding: const EdgeInsets.all(24),
-              child: Text(
-                'Unable to load your profile.',
-                textAlign: TextAlign.center,
-                style: Theme.of(context).textTheme.bodyLarge,
-              ),
-            ),
-          );
-        }
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Profile'),
+        actions: [
+          IconButton(
+            tooltip: 'Edit profile',
+            onPressed: () {
+              _openEditProfile(context);
+            },
+            icon: const Icon(Icons.edit_outlined),
+          ),
+          const SizedBox(width: 8),
+        ],
+      ),
+      body: StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+        stream: _profileService.watchCurrentUserProfile(),
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const Center(child: CircularProgressIndicator());
+          }
 
-        if (snapshot.connectionState == ConnectionState.waiting &&
-            !snapshot.hasData) {
-          return const Center(child: CircularProgressIndicator());
-        }
+          if (snapshot.hasError) {
+            return const _ProfileErrorState();
+          }
 
-        final profile = snapshot.data;
+          final data = snapshot.data?.data() ?? <String, dynamic>{};
 
-        final displayName =
-            profile?.displayName?.trim() ?? user.displayName?.trim();
+          final firestoreDisplayName = data['displayName'];
 
-        final email = profile?.email ?? user.email ?? '';
+          final firestoreEmail = data['email'];
 
-        return ListView(
-          padding: const EdgeInsets.fromLTRB(20, 12, 20, 32),
-          children: [
-            Card(
-              margin: EdgeInsets.zero,
-              child: Padding(
-                padding: const EdgeInsets.all(20),
-                child: Row(
+          final displayName =
+              firestoreDisplayName is String &&
+                  firestoreDisplayName.trim().isNotEmpty
+              ? firestoreDisplayName.trim()
+              : user.displayName ?? '';
+
+          final email =
+              firestoreEmail is String && firestoreEmail.trim().isNotEmpty
+              ? firestoreEmail.trim()
+              : user.email ?? '';
+
+          return RefreshIndicator(
+            onRefresh: () async {
+              await user.reload();
+            },
+            child: ListView(
+              physics: const AlwaysScrollableScrollPhysics(),
+              padding: const EdgeInsets.fromLTRB(20, 20, 20, 32),
+              children: [
+                ProfileHeader(name: displayName, email: email),
+                const SizedBox(height: 24),
+                _SectionCard(
+                  title: 'Account information',
+                  icon: Icons.badge_outlined,
                   children: [
-                    CircleAvatar(
-                      radius: 30,
-                      child: Text(
-                        _initials(displayName, email),
-                        style: Theme.of(context).textTheme.titleLarge
-                            ?.copyWith(fontWeight: FontWeight.w800),
-                      ),
+                    ProfileInfoTile(
+                      icon: Icons.person_outline_rounded,
+                      label: 'Full name',
+                      value: displayName.isEmpty ? 'Not set' : displayName,
                     ),
-
-                    const SizedBox(width: 16),
-
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            displayName?.isNotEmpty == true
-                                ? displayName!
-                                : 'Your name',
-                            style: Theme.of(context).textTheme.titleMedium
-                                ?.copyWith(
-                                  fontSize: 18,
-                                  fontWeight: FontWeight.w800,
-                                ),
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            email,
-                            style: Theme.of(context).textTheme.bodyMedium,
-                          ),
-                        ],
-                      ),
-                    ),
-
-                    IconButton(
-                      onPressed: _editProfile,
-                      icon: const Icon(Icons.edit_outlined),
-                      tooltip: 'Edit profile',
+                    const SizedBox(height: 14),
+                    ProfileInfoTile(
+                      icon: Icons.email_outlined,
+                      label: 'Email address',
+                      value: email.isEmpty ? 'Not available' : email,
                     ),
                   ],
                 ),
-              ),
-            ),
-
-            const SizedBox(height: 24),
-
-            Text(
-              'Account',
-              style: Theme.of(context).textTheme.titleMedium
-                  ?.copyWith(fontWeight: FontWeight.w700),
-            ),
-
-            const SizedBox(height: 10),
-
-            Card(
-              margin: EdgeInsets.zero,
-              child: Column(
-                children: [
-                  ListTile(
-                    leading: const Icon(Icons.person_outline_rounded),
-                    title: const Text('Personal information'),
-                    subtitle: const Text(
-                      'Manage your name and account information',
+                const SizedBox(height: 20),
+                _SectionCard(
+                  title: 'Account settings',
+                  icon: Icons.settings_outlined,
+                  children: [
+                    Material(
+                      color: Colors.transparent,
+                      child: ListTile(
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 4,
+                        ),
+                        leading: const Icon(Icons.notifications_none_rounded),
+                        title: const Text('Notification preferences'),
+                        subtitle: const Text('Manage how you receive alerts'),
+                        trailing: const Icon(Icons.chevron_right_rounded),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                        onTap: () {
+                          AppSnackBar.showComingSoon(
+                            context,
+                            'Notification preferences',
+                          );
+                        },
+                      ),
                     ),
-                    trailing: const Icon(Icons.chevron_right_rounded),
-                    onTap: _editProfile,
-                  ),
-
-                  const Divider(height: 1, indent: 16, endIndent: 16),
-
-                  ListTile(
-                    leading: const Icon(Icons.email_outlined),
-                    title: const Text('Email address'),
-                    subtitle: Text(email),
-                  ),
-
-                  const Divider(height: 1, indent: 16, endIndent: 16),
-
-                  ListTile(
-                    leading: const Icon(Icons.lock_outline_rounded),
-                    title: const Text('Change password'),
-                    trailing: const Icon(Icons.chevron_right_rounded),
-                    onTap: () {},
-                  ),
-                ],
-              ),
+                    const SizedBox(height: 6),
+                    Material(
+                      color: Colors.transparent,
+                      child: ListTile(
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 4,
+                        ),
+                        leading: const Icon(Icons.security_outlined),
+                        title: const Text('Security'),
+                        subtitle: const Text('Manage account security'),
+                        trailing: const Icon(Icons.chevron_right_rounded),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                        onTap: () {
+                          AppSnackBar.showComingSoon(context, 'Security');
+                        },
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 20),
+                _SectionCard(
+                  title: 'Session',
+                  icon: Icons.login_outlined,
+                  children: [
+                    Material(
+                      color: Colors.transparent,
+                      child: ListTile(
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 4,
+                        ),
+                        leading: Icon(
+                          Icons.logout_rounded,
+                          color: Theme.of(context).colorScheme.error,
+                        ),
+                        title: Text(
+                          'Sign out',
+                          style: TextStyle(
+                            color: Theme.of(context).colorScheme.error,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        subtitle: const Text('Sign out from this device'),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                        onTap: () {
+                          _signOut(context);
+                        },
+                      ),
+                    ),
+                  ],
+                ),
+              ],
             ),
+          );
+        },
+      ),
+    );
+  }
+}
 
-            const SizedBox(height: 24),
+class _SectionCard extends StatelessWidget {
+  const _SectionCard({
+    required this.title,
+    required this.icon,
+    required this.children,
+  });
 
+  final String title;
+  final IconData icon;
+  final List<Widget> children;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: colorScheme.surface,
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: colorScheme.outlineVariant),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  color: colorScheme.surfaceContainerHighest,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Icon(icon, size: 20, color: colorScheme.primary),
+              ),
+              const SizedBox(width: 12),
+              Text(
+                title,
+                style: theme.textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          ...children,
+        ],
+      ),
+    );
+  }
+}
+
+class _ProfileErrorState extends StatelessWidget {
+  const _ProfileErrorState();
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Icons.cloud_off_rounded,
+              size: 52,
+              color: colorScheme.onSurfaceVariant,
+            ),
+            const SizedBox(height: 16),
             Text(
-              'Account status',
-              style: Theme.of(context).textTheme.titleMedium
-                  ?.copyWith(fontWeight: FontWeight.w700),
-            ),
-
-            const SizedBox(height: 10),
-
-            const Card(
-              margin: EdgeInsets.zero,
-              child: ListTile(
-                leading: Icon(Icons.verified_user_outlined),
-                title: Text('Account active'),
-                subtitle: Text('Your account is in good standing.'),
-                trailing: Icon(Icons.check_circle_outline_rounded),
+              'Unable to load your profile',
+              textAlign: TextAlign.center,
+              style: theme.textTheme.titleLarge?.copyWith(
+                fontWeight: FontWeight.w800,
               ),
             ),
-
-            const SizedBox(height: 24),
-
-            FilledButton.tonalIcon(
-              onPressed: _isSigningOut ? null : _signOut,
-              style: FilledButton.styleFrom(
-                minimumSize: const Size.fromHeight(52),
+            const SizedBox(height: 8),
+            Text(
+              'Please check your connection and try again.',
+              textAlign: TextAlign.center,
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: colorScheme.onSurfaceVariant,
               ),
-              icon: _isSigningOut
-                  ? const SizedBox(
-                      width: 20,
-                      height: 20,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Icon(Icons.logout_rounded),
-              label: Text(_isSigningOut ? 'Signing out...' : 'Sign out'),
             ),
           ],
-        );
-      },
+        ),
+      ),
     );
   }
 }

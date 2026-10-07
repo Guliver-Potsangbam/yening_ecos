@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:yening_ecos/features/onboarding/data/onboarding_storage.dart';
 
+import '../../core/preferences/temperature_unit_preference.dart';
+import '../devices/widgets/temperature_unit_selector.dart';
+
 class SettingsPage extends StatefulWidget {
   const SettingsPage({super.key});
 
@@ -14,8 +17,6 @@ class _SettingsPageState extends State<SettingsPage> {
   bool _maintenanceAlerts = true;
   bool _sound = true;
   bool _vibration = true;
-
-  String _temperatureUnit = 'Celsius';
 
   @override
   Widget build(BuildContext context) {
@@ -117,12 +118,15 @@ class _SettingsPageState extends State<SettingsPage> {
                   },
                 ),
                 const Divider(height: 1, indent: 16, endIndent: 16),
-                ListTile(
-                  leading: const Icon(Icons.thermostat_outlined),
-                  title: const Text('Temperature unit'),
-                  subtitle: Text(_temperatureUnit),
-                  trailing: const Icon(Icons.chevron_right_rounded),
-                  onTap: _showTemperatureUnitSelector,
+                ValueListenableBuilder<TemperatureUnit>(
+                  valueListenable: TemperatureUnitPreference.instance,
+                  builder: (context, unit, _) => ListTile(
+                    leading: const Icon(Icons.thermostat_outlined),
+                    title: const Text('Temperature unit'),
+                    subtitle: Text(unit.label),
+                    trailing: const Icon(Icons.chevron_right_rounded),
+                    onTap: _showTemperatureUnitSelector,
+                  ),
                 ),
                 TextButton.icon(
                   onPressed: _resetOnboarding,
@@ -205,31 +209,15 @@ class _SettingsPageState extends State<SettingsPage> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              ListTile(
-                title: const Text('Celsius'),
-                trailing: _temperatureUnit == 'Celsius'
-                    ? const Icon(Icons.check_rounded)
-                    : null,
-                onTap: () {
-                  setState(() {
-                    _temperatureUnit = 'Celsius';
-                  });
-
-                  Navigator.of(context).pop();
-                },
-              ),
-              ListTile(
-                title: const Text('Fahrenheit'),
-                trailing: _temperatureUnit == 'Fahrenheit'
-                    ? const Icon(Icons.check_rounded)
-                    : null,
-                onTap: () {
-                  setState(() {
-                    _temperatureUnit = 'Fahrenheit';
-                  });
-
-                  Navigator.of(context).pop();
-                },
+              const Padding(
+                padding: EdgeInsets.fromLTRB(24, 8, 24, 24),
+                child: Column(
+                  children: [
+                    Text('Temperature unit'),
+                    SizedBox(height: 16),
+                    TemperatureUnitSelector(),
+                  ],
+                ),
               ),
               const SizedBox(height: 8),
             ],

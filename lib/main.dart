@@ -5,6 +5,7 @@ import 'package:flutter_native_splash/flutter_native_splash.dart';
 
 import 'app/app.dart';
 import 'core/firebase/firebase_bootstrap.dart';
+import 'core/preferences/temperature_unit_preference.dart';
 import 'core/notifications/notification_message_handler.dart';
 
 Future<void> main() async {
@@ -13,6 +14,7 @@ Future<void> main() async {
   FlutterNativeSplash.preserve(widgetsBinding: widgetsBinding);
 
   await FirebaseBootstrap.initialize();
+  await TemperatureUnitPreference.instance.load();
 
   runApp(const MyApp());
 

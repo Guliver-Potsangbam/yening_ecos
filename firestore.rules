@@ -3,39 +3,130 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isCurrentUser(userId) {
+      return isSignedIn()
+        && request.auth.uid == userId;
+    }
+
+    // ----------------------------------------------------------
+    // Device type definitions
+    // ----------------------------------------------------------
+
+    match /deviceTypes/{deviceTypeId} {
+
+      allow read: if isSignedIn();
+
+      allow create, update, delete: if false;
+    }
+
+    // ----------------------------------------------------------
+    // Physical device registry
+    // ----------------------------------------------------------
+
+    match /devices/{deviceId} {
+
+      // Users may only see an unclaimed device
+      // or a device they already own.
+      allow read: if isSignedIn()
+        && (
+          resource.data.status == 'unclaimed'
+          || resource.data.claimedByUid == request.auth.uid
+        );
+
+      // Device registry documents are created by
+      // controlled company tooling, not the customer app.
+      allow create: if false;
+
+      // Customer app may perform only the
+      // unclaimed -> claimed transition.
+      allow update: if isSignedIn()
+        && resource.data.status == 'unclaimed'
+        && request.resource.data.status == 'claimed'
+        && request.resource.data.claimedByUid == request.auth.uid
+        && request.resource.data.deviceId == deviceId
+        && request.resource.data.deviceTypeId
+            == resource.data.deviceTypeId
+        && request.resource.data.serialNumber
+            == resource.data.serialNumber
+        && request.resource.data.diff(resource.data)
+            .affectedKeys()
+            .hasOnly([
+              'status',
+              'claimedByUid',
+              'claimedAt',
+              'updatedAt'
+            ]);
+
+      allow delete: if false;
+    }
+
+    // ----------------------------------------------------------
+    // Users
+    // ----------------------------------------------------------
+
     match /users/{userId} {
 
-      allow create: if request.auth != null
-                    && request.auth.uid == userId
-                    && request.resource.data.email == request.auth.token.email;
+      allow create: if isCurrentUser(userId)
+        && request.resource.data.email
+            == request.auth.token.email;
 
-      allow read: if request.auth != null
-                  && request.auth.uid == userId;
+      allow read: if isCurrentUser(userId);
 
-      allow update: if request.auth != null
-                    && request.auth.uid == userId
-                    && request.resource.data.email == resource.data.email;
+      allow update: if isCurrentUser(userId)
+        && request.resource.data.email
+            == resource.data.email;
 
       allow delete: if false;
 
-      match /notificationTokens/{installationId} {
+      // --------------------------------------------------------
+      // Devices belonging to a user
+      // --------------------------------------------------------
 
-        allow create: if request.auth != null
-                      && request.auth.uid == userId
-                      && request.resource.data.token is string
-                      && request.resource.data.platform is string;
+      match /devices/{deviceId} {
 
-        allow update: if request.auth != null
-                      && request.auth.uid == userId
-                      && request.resource.data.token is string
-                      && request.resource.data.platform is string;
+        allow read: if isCurrentUser(userId);
 
-        allow delete: if request.auth != null
-                      && request.auth.uid == userId;
+        allow create: if isCurrentUser(userId)
+          && request.resource.data.deviceId
+              == deviceId
+          && getAfter(
+                /databases/$(database)/documents/devices/$(deviceId)
+              ).data.status == 'claimed'
+          && getAfter(
+                /databases/$(database)/documents/devices/$(deviceId)
+              ).data.claimedByUid == userId;
 
-        allow read: if false;
+        allow update: if isCurrentUser(userId)
+          && request.resource.data.deviceId
+              == resource.data.deviceId
+          && request.resource.data.serialNumber
+              == resource.data.serialNumber
+          && request.resource.data.deviceTypeId
+              == resource.data.deviceTypeId;
+
+        allow delete: if false;
+      }
+
+      // Alerts will use these rules later.
+      match /alerts/{alertId} {
+        allow read: if isCurrentUser(userId);
+        allow create, update, delete: if false;
+      }
+
+      // FCM registration tokens.
+      match /notificationTokens/{tokenId} {
+        allow read, create, update, delete:
+            if isCurrentUser(userId);
       }
     }
+
+    // ----------------------------------------------------------
+    // Everything else
+    // ----------------------------------------------------------
 
     match /{document=**} {
       allow read, write: if false;
