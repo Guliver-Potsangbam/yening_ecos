@@ -8,33 +8,52 @@ class UserDeviceCard extends StatelessWidget {
     required this.device,
     this.onTap,
     this.telemetry,
+    this.showSerialNumber = true,
   });
 
   final UserDevice device;
   final VoidCallback? onTap;
   final Widget? telemetry;
+  final bool showSerialNumber;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return Card(
+      elevation: 0,
+      margin: EdgeInsets.zero,
+      color: theme.colorScheme.surfaceContainerLowest,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(20),
+        side: BorderSide(
+          color: theme.colorScheme.outlineVariant.withValues(alpha: 0.6),
+        ),
+      ),
       clipBehavior: Clip.antiAlias,
       child: InkWell(
         onTap: onTap,
         child: Padding(
-          padding: const EdgeInsets.all(18),
+          padding: const EdgeInsets.all(14),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Icon(
-                    Icons.sensors_rounded,
-                    color: theme.colorScheme.primary,
-                    size: 32,
+                  Container(
+                    width: 38,
+                    height: 38,
+                    decoration: BoxDecoration(
+                      color: theme.colorScheme.primary.withValues(alpha: 0.08),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Icon(
+                      Icons.sensors_rounded,
+                      color: theme.colorScheme.primary,
+                      size: 22,
+                    ),
                   ),
-                  const SizedBox(width: 14),
+                  const SizedBox(width: 12),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -43,37 +62,42 @@ class UserDeviceCard extends StatelessWidget {
                           device.deviceName,
                           style: theme.textTheme.titleMedium?.copyWith(
                             fontWeight: FontWeight.w700,
+                            letterSpacing: -0.25,
                           ),
                         ),
-                        const SizedBox(height: 6),
+                        const SizedBox(height: 3),
                         Text(
                           device.deviceId,
-                          style: theme.textTheme.bodyMedium,
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: theme.colorScheme.onSurfaceVariant,
+                          ),
                         ),
-                        if (device.serialNumber.isNotEmpty) ...[
+                        if (showSerialNumber &&
+                            device.serialNumber.isNotEmpty) ...[
                           const SizedBox(height: 4),
                           Text(
                             'Serial: ${device.serialNumber}',
                             style: theme.textTheme.bodySmall,
                           ),
                         ],
-                        const SizedBox(height: 10),
-                        Text(
-                          'Added to your account',
-                          style: theme.textTheme.labelMedium?.copyWith(
-                            color: theme.colorScheme.onSurfaceVariant,
-                          ),
-                        ),
                       ],
                     ),
                   ),
-                  if (onTap != null) const Icon(Icons.chevron_right_rounded),
+                  if (onTap != null)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 7),
+                      child: Icon(
+                        Icons.chevron_right_rounded,
+                        color: theme.colorScheme.onSurfaceVariant,
+                        size: 20,
+                      ),
+                    ),
                 ],
               ),
               if (telemetry != null) ...[
-                const SizedBox(height: 18),
+                const SizedBox(height: 14),
                 const Divider(height: 1),
-                const SizedBox(height: 18),
+                const SizedBox(height: 14),
                 telemetry!,
               ],
             ],

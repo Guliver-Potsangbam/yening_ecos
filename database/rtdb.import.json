@@ -1,0 +1,22 @@
+{
+  "deviceAccess": {
+    "YEC-DEV-000001": {
+      "ownerUid": "LfyDXygCVocPj51mja8D8JvvMUG3",
+      "enabled": true,
+      "writerUid": "uHGaJO8R4GNha8yYTLOh2flUS7C3"
+    }
+  },
+  "deviceLive": {
+    "YEC-DEV-000001": {
+      "connectivity": {
+        "isOnline": false,
+        "lastSeen": 0
+      },
+      "telemetry": {
+        "temperature": null,
+        "humidity": null,
+        "light": null
+      }
+    }
+  }
+}

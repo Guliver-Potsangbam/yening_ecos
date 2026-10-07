@@ -58,15 +58,17 @@ void main() {
         .feed('deviceLive/device-1')
         .add(
           _Event({
-            'telemetry': {'temperature': 24, 'humidity': 50},
+            'telemetry': {'temperature': 24, 'humidity': 50, 'light': 37.5},
           }),
         );
     await Future<void>.delayed(Duration.zero);
     expect(readings.last.temperatureCelsius, 24);
+    expect(readings.last.lightPercent, 37.5);
     expect(readings.last.isCloudConnected, isTrue);
     database.feed('.info/connected').add(_Event(false));
     await Future<void>.delayed(Duration.zero);
     expect(readings.last.isCloudConnected, isFalse);
+    expect(readings.last.lightPercent, 37.5);
     expect(
       readings.last.temperatureCelsius,
       24,
@@ -96,4 +98,42 @@ void main() {
       expect(database.paths, isEmpty);
     },
   );
+
+  test('each five-second heartbeat is forwarded even when sensor values stay the same', () async {
+    final database = _Database();
+    final readings = <DeviceTelemetry>[];
+    final subscription = DeviceTelemetryService(database: database)
+        .watchDevice('device-1')
+        .listen(readings.add);
+    database.feed('.info/connected').add(_Event(true));
+    const startedAt = 1700000000000;
+    for (var tick = 0; tick < 3; tick++) {
+      database
+          .feed('deviceLive/device-1')
+          .add(
+            _Event({
+              'telemetry': {'temperature': 24, 'humidity': 50, 'light': 37.5},
+              'connectivity': {
+                'isOnline': true,
+                'lastSeen': startedAt + tick * 5000,
+              },
+            }),
+          );
+      await Future<void>.delayed(Duration.zero);
+      expect(readings.length, tick + 1);
+      expect(
+        readings.last.lastSeen!.millisecondsSinceEpoch,
+        startedAt + tick * 5000,
+      );
+      expect(readings.last.temperatureCelsius, 24);
+      expect(readings.last.humidity, 50);
+      expect(readings.last.lightPercent, 37.5);
+    }
+    expect(database.paths, ['.info/connected', 'deviceLive/device-1']);
+    await subscription.cancel();
+    for (final feed in database.events.values) {
+      expect(feed.hasListener, isFalse);
+      await feed.close();
+    }
+  });
 }

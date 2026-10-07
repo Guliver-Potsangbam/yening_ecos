@@ -9,9 +9,37 @@ class TemperatureUnitSelector extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final units = preference ?? TemperatureUnitPreference.instance;
+    final scheme = Theme.of(context).colorScheme;
     return ValueListenableBuilder<TemperatureUnit>(
       valueListenable: units,
       builder: (context, unit, _) => SegmentedButton<TemperatureUnit>(
+        style: ButtonStyle(
+          visualDensity: VisualDensity.compact,
+          minimumSize: const WidgetStatePropertyAll(Size(32, 32)),
+          padding: const WidgetStatePropertyAll(
+            EdgeInsets.symmetric(horizontal: 9),
+          ),
+          textStyle: WidgetStatePropertyAll(
+            Theme.of(context).textTheme.labelMedium
+                ?.copyWith(fontWeight: FontWeight.w700),
+          ),
+          side: WidgetStatePropertyAll(
+            BorderSide(color: scheme.outlineVariant.withValues(alpha: 0.6)),
+          ),
+          backgroundColor: WidgetStateProperty.resolveWith(
+            (states) => states.contains(WidgetState.selected)
+                ? scheme.primary.withValues(alpha: 0.1)
+                : scheme.surfaceContainerLow,
+          ),
+          foregroundColor: WidgetStateProperty.resolveWith(
+            (states) => states.contains(WidgetState.selected)
+                ? scheme.primary
+                : scheme.onSurfaceVariant,
+          ),
+          shape: WidgetStatePropertyAll(
+            RoundedRectangleBorder(borderRadius: BorderRadius.circular(9)),
+          ),
+        ),
         segments: const [
           ButtonSegment(
             value: TemperatureUnit.celsius,

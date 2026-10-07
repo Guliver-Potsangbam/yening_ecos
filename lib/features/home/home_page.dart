@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 
-import '../device_setup/add_device_page.dart';
 import '../../core/preferences/temperature_unit_preference.dart';
 import '../devices/device_details_page.dart';
 import '../devices/models/user_device.dart';
@@ -28,6 +27,7 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> {
   late Stream<UserDevicesState> _devices;
+  String? _selectedDeviceId;
 
   @override
   void initState() {
@@ -46,9 +46,53 @@ class _HomePageState extends State<HomePage> {
     if (oldWidget.devicesStream != widget.devicesStream) _watchDevices();
   }
 
-  void _openAddDevice(BuildContext context) {
-    Navigator.of(context)
-        .push(MaterialPageRoute(builder: (_) => const AddDevicePage()));
+  Future<void> _switchDevice(
+    List<UserDevice> devices,
+    String selectedId,
+  ) async {
+    final selected = await showModalBottomSheet<String>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      showDragHandle: true,
+      builder: (context) => FractionallySizedBox(
+        heightFactor: 0.65,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(24, 0, 24, 16),
+              child: Text(
+                'Select a device',
+                style: Theme.of(context).textTheme.titleLarge,
+              ),
+            ),
+            Expanded(
+              child: ListView.separated(
+                itemCount: devices.length,
+                separatorBuilder: (_, _) => const Divider(height: 1),
+                itemBuilder: (context, index) {
+                  final device = devices[index];
+                  return ListTile(
+                    key: ValueKey('select-${device.deviceId}'),
+                    leading: const Icon(Icons.sensors_rounded),
+                    title: Text(device.deviceName),
+                    subtitle: Text(device.deviceId),
+                    selected: device.deviceId == selectedId,
+                    trailing: device.deviceId == selectedId
+                        ? const Icon(Icons.check_rounded)
+                        : null,
+                    onTap: () => Navigator.of(context).pop(device.deviceId),
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (!mounted || selected == null || selected == _selectedDeviceId) return;
+    setState(() => _selectedDeviceId = selected);
   }
 
   void _openDevice(UserDevice device) {
@@ -91,49 +135,74 @@ class _HomePageState extends State<HomePage> {
         }
         final state = snapshot.data;
         if (state == null || state.isLoading) {
+          _selectedDeviceId = null;
           return const Center(child: CircularProgressIndicator());
         }
         if (state.devices.isEmpty) {
-          return HomeEmptyState(onAddDevice: () => _openAddDevice(context));
+          _selectedDeviceId = null;
+          return const HomeEmptyState();
         }
+        final device = state.devices.firstWhere(
+          (device) => device.deviceId == _selectedDeviceId,
+          orElse: () => state.devices.first,
+        );
+        _selectedDeviceId = device.deviceId;
         final theme = Theme.of(context);
-        return SafeArea(
-          child: ListView(
-            padding: const EdgeInsets.fromLTRB(20, 20, 20, 32),
-            children: [
-              Text(
-                'Your environment',
-                style: theme.textTheme.headlineMedium?.copyWith(
-                  fontWeight: FontWeight.w800,
-                  letterSpacing: -0.6,
+        return ColoredBox(
+          color: theme.colorScheme.surfaceContainerLow,
+          child: SafeArea(
+            child: Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 960),
+                child: Column(
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              'Your environment',
+                              style: theme.textTheme.headlineSmall?.copyWith(
+                                fontWeight: FontWeight.w700,
+                                letterSpacing: -0.4,
+                              ),
+                            ),
+                          ),
+                          if (state.devices.length >= 2) ...[
+                            const SizedBox(width: 12),
+                            IconButton.filledTonal(
+                              tooltip: 'Switch device',
+                              onPressed: () =>
+                                  _switchDevice(state.devices, device.deviceId),
+                              icon: const Icon(Icons.swap_horiz_rounded),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                    Expanded(
+                      child: ListView(
+                        padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+                        children: [
+                          UserDeviceCard(
+                            key: ValueKey(device.deviceId),
+                            device: device,
+                            showSerialNumber: false,
+                            onTap: () => _openDevice(device),
+                            telemetry: DeviceTelemetryPanel(
+                              deviceId: device.deviceId,
+                              telemetrySource: widget.telemetrySource,
+                              unitPreference: widget.unitPreference,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
                 ),
               ),
-              const SizedBox(height: 8),
-              Text(
-                '${state.devices.length} ${state.devices.length == 1 ? 'device' : 'devices'} added to your account.',
-                style: theme.textTheme.bodyLarge?.copyWith(
-                  color: theme.colorScheme.onSurfaceVariant,
-                ),
-              ),
-              const SizedBox(height: 22),
-              for (final device in state.devices)
-                UserDeviceCard(
-                  key: ValueKey(device.deviceId),
-                  device: device,
-                  onTap: () => _openDevice(device),
-                  telemetry: DeviceTelemetryPanel(
-                    deviceId: device.deviceId,
-                    telemetrySource: widget.telemetrySource,
-                    unitPreference: widget.unitPreference,
-                  ),
-                ),
-              const SizedBox(height: 16),
-              FilledButton.icon(
-                onPressed: () => _openAddDevice(context),
-                icon: const Icon(Icons.add_rounded),
-                label: const Text('Add Device'),
-              ),
-            ],
+            ),
           ),
         );
       },

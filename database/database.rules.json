@@ -1,0 +1,46 @@
+{
+  "rules": {
+    ".read": false,
+    ".write": false,
+    "deviceAccess": {
+      ".read": false,
+      ".write": false
+    },
+    "deviceLive": {
+      "$deviceId": {
+        ".read": "auth != null && root.child('deviceAccess').child($deviceId).child('enabled').val() === true && (auth.uid === root.child('deviceAccess').child($deviceId).child('ownerUid').val() || auth.uid === root.child('deviceAccess').child($deviceId).child('writerUid').val())",
+        ".write": "auth != null && root.child('deviceAccess').child($deviceId).child('enabled').val() === true && auth.uid === root.child('deviceAccess').child($deviceId).child('writerUid').val() && auth.uid !== root.child('deviceAccess').child($deviceId).child('ownerUid').val() && newData.exists() && newData.hasChildren(['connectivity'])",
+        "connectivity": {
+          ".validate": "newData.hasChildren(['isOnline', 'lastSeen'])",
+          "isOnline": {
+            ".validate": "newData.isBoolean()"
+          },
+          "lastSeen": {
+            ".validate": "newData.isNumber() && newData.val() % 1 === 0 && newData.val() >= 0 && (newData.val() === data.val() || (newData.val() >= now - 60000 && newData.val() <= now + 5000))"
+          },
+          "$other": {
+            ".validate": false
+          }
+        },
+        "telemetry": {
+          ".validate": "newData.hasChildren()",
+          "temperature": {
+            ".validate": "newData.isNumber() && newData.val() >= -40 && newData.val() <= 80"
+          },
+          "humidity": {
+            ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 100"
+          },
+          "$other": {
+            ".validate": false
+          },
+          "light": {
+            ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 100"
+          }
+        },
+        "$other": {
+          ".validate": false
+        }
+      }
+    }
+  }
+}

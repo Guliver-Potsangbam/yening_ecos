@@ -20,20 +20,27 @@ class DeviceDetailsPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: Theme.of(context).colorScheme.surfaceContainerLow,
       appBar: AppBar(title: const Text('Device details')),
       body: SafeArea(
-        child: ListView(
-          padding: const EdgeInsets.fromLTRB(20, 20, 20, 32),
-          children: [
-            UserDeviceCard(
-              device: device,
-              telemetry: DeviceTelemetryPanel(
-                deviceId: device.deviceId,
-                telemetrySource: telemetrySource,
-                unitPreference: unitPreference,
-              ),
+        child: Align(
+          alignment: Alignment.topCenter,
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 960),
+            child: ListView(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+              children: [
+                UserDeviceCard(
+                  device: device,
+                  telemetry: DeviceTelemetryPanel(
+                    deviceId: device.deviceId,
+                    telemetrySource: telemetrySource,
+                    unitPreference: unitPreference,
+                  ),
+                ),
+              ],
             ),
-          ],
+          ),
         ),
       ),
     );

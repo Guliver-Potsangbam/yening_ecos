@@ -42,6 +42,7 @@ class DeviceTelemetryService {
           DeviceTelemetry(
             temperatureCelsius: reading.temperatureCelsius,
             humidity: reading.humidity,
+            lightPercent: reading.lightPercent,
             lastSeen: reading.lastSeen,
             isOnline: reading.isOnline,
             isCloudConnected: connected,

@@ -34,7 +34,7 @@ class _DeviceTelemetryPanelState extends State<DeviceTelemetryPanel> {
   void initState() {
     super.initState();
     _watch();
-    _freshnessTimer = Timer.periodic(const Duration(seconds: 10), (_) {
+    _freshnessTimer = Timer.periodic(const Duration(seconds: 5), (_) {
       if (mounted) setState(() {});
     });
   }
@@ -68,11 +68,17 @@ class _DeviceTelemetryPanelState extends State<DeviceTelemetryPanel> {
   String _updatedAt(DateTime? seen) {
     if (seen == null) return 'Waiting for a device update';
     final age = DateTime.now().difference(seen);
-    if (age.inSeconds < 10) return 'Updated just now';
+    if (age.inSeconds < 1) return 'Updated just now';
     if (age.inSeconds < 60) return 'Updated ${age.inSeconds}s ago';
     if (age.inMinutes < 60) return 'Updated ${age.inMinutes}m ago';
     if (age.inHours < 24) return 'Updated ${age.inHours}h ago';
     return 'Updated ${age.inDays}d ago';
+  }
+
+  String _updateTime(DateTime seen) {
+    final local = seen.toLocal();
+    String twoDigits(int value) => value.toString().padLeft(2, '0');
+    return 'Last update: ${twoDigits(local.hour)}:${twoDigits(local.minute)}:${twoDigits(local.second)}';
   }
 
   @override
@@ -124,43 +130,64 @@ class _DeviceTelemetryPanelState extends State<DeviceTelemetryPanel> {
             children: [
               Wrap(
                 spacing: 12,
-                runSpacing: 8,
+                runSpacing: 6,
                 crossAxisAlignment: WrapCrossAlignment.center,
                 children: [
                   Text(
-                    'Sensor readings',
-                    style: theme.textTheme.titleMedium?.copyWith(
+                    'Measurements',
+                    style: theme.textTheme.titleSmall?.copyWith(
                       fontWeight: FontWeight.w700,
                     ),
                   ),
-                  TemperatureUnitSelector(preference: _units),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 4,
+                    ),
+                    decoration: BoxDecoration(
+                      color:
+                          (fresh && reading.hasReadings
+                                  ? theme.colorScheme.primary
+                                  : theme.colorScheme.onSurfaceVariant)
+                              .withValues(alpha: 0.08),
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          Icons.circle,
+                          size: 6,
+                          color: fresh && reading.hasReadings
+                              ? theme.colorScheme.primary
+                              : theme.colorScheme.onSurfaceVariant,
+                        ),
+                        const SizedBox(width: 5),
+                        Flexible(
+                          child: Text(
+                            status,
+                            style: theme.textTheme.labelSmall,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
                 ],
               ),
               const SizedBox(height: 12),
-              Row(
-                children: [
-                  Icon(
-                    Icons.circle,
-                    size: 8,
-                    color: fresh && reading.hasReadings
-                        ? theme.colorScheme.primary
-                        : theme.colorScheme.onSurfaceVariant,
-                  ),
-                  const SizedBox(width: 6),
-                  Expanded(
-                    child: Text(status, style: theme.textTheme.labelLarge),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 8),
-              Text(
-                _updatedAt(reading.lastSeen),
-                style: theme.textTheme.bodySmall,
-              ),
-              const SizedBox(height: 14),
               LayoutBuilder(
                 builder: (context, constraints) {
+                  final textScale = MediaQuery.textScalerOf(context).scale(1);
+                  final minimumWidth = 136 * textScale;
+                  final columns =
+                      constraints.maxWidth >= 600 &&
+                          constraints.maxWidth >= minimumWidth * 3 + 24
+                      ? 3
+                      : constraints.maxWidth >= minimumWidth * 2 + 12
+                      ? 2
+                      : 1;
                   final temperature = TelemetryGauge(
+                    key: const ValueKey('temperature-meter'),
                     label: 'Temperature',
                     value: reading.temperatureCelsius == null
                         ? null
@@ -168,36 +195,77 @@ class _DeviceTelemetryPanelState extends State<DeviceTelemetryPanel> {
                     unit: unit.symbol,
                     minimum: unit.fromCelsius(-40),
                     maximum: unit.fromCelsius(80),
-                    color: Colors.deepOrange,
+                    lowThreshold: unit.fromCelsius(20),
+                    highThreshold: unit.fromCelsius(35),
+                    color: const Color(0xFF218A72),
                     icon: Icons.thermostat_rounded,
+                    trailing: TemperatureUnitSelector(preference: _units),
+                    horizontal:
+                        columns < 3 && constraints.maxWidth >= 300 * textScale,
                   );
                   final humidity = TelemetryGauge(
+                    key: const ValueKey('humidity-meter'),
                     label: 'Humidity',
                     value: reading.humidity,
                     unit: '%',
                     minimum: 0,
                     maximum: 100,
-                    color: Colors.blue,
+                    lowThreshold: 40,
+                    highThreshold: 70,
+                    color: const Color(0xFF218A72),
                     icon: Icons.water_drop_rounded,
                   );
-                  if (constraints.maxWidth < 280) {
-                    return Column(
-                      children: [
-                        temperature,
-                        const SizedBox(height: 20),
-                        humidity,
-                      ],
-                    );
-                  }
-                  return Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+                  final light = TelemetryGauge(
+                    key: const ValueKey('light-meter'),
+                    label: 'Light',
+                    statusLabel: reading.lightLabel,
+                    value: reading.lightPercent,
+                    unit: '%',
+                    minimum: 0,
+                    maximum: 100,
+                    lowThreshold: 23,
+                    highThreshold: 45,
+                    lowColor: const Color(0xFF64748B),
+                    color: const Color(0xFF218A72),
+                    icon: Icons.light_mode_rounded,
+                  );
+                  final gaugeWidth =
+                      (constraints.maxWidth - 12 * (columns - 1)) / columns;
+                  return Wrap(
+                    spacing: 12,
+                    runSpacing: 12,
                     children: [
-                      Expanded(child: temperature),
-                      const SizedBox(width: 16),
-                      Expanded(child: humidity),
+                      SizedBox(
+                        width: columns == 2 ? constraints.maxWidth : gaugeWidth,
+                        child: temperature,
+                      ),
+                      SizedBox(width: gaugeWidth, child: humidity),
+                      SizedBox(width: gaugeWidth, child: light),
                     ],
                   );
                 },
+              ),
+              const SizedBox(height: 10),
+              Wrap(
+                spacing: 12,
+                runSpacing: 4,
+                children: [
+                  Text(
+                    _updatedAt(reading.lastSeen),
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                  if (reading.lastSeen != null &&
+                      reading.lastSeen!.millisecondsSinceEpoch > 0)
+                    Text(
+                      _updateTime(reading.lastSeen!),
+                      key: const ValueKey('telemetry-updated-time'),
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                ],
               ),
               if (!reading.hasReadings) ...[
                 const SizedBox(height: 16),
