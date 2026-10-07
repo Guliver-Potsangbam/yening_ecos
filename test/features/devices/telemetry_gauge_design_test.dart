@@ -7,9 +7,12 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:yening_ecos/core/preferences/temperature_unit_preference.dart';
+import 'package:yening_ecos/core/ui/app_theme.dart';
 import 'package:yening_ecos/features/devices/device_details_page.dart';
+import 'package:yening_ecos/features/devices/models/device_details.dart';
 import 'package:yening_ecos/features/devices/models/device_telemetry.dart';
 import 'package:yening_ecos/features/devices/models/user_device.dart';
+import 'package:yening_ecos/features/devices/services/device_details_service.dart';
 import 'package:yening_ecos/features/devices/services/user_devices_service.dart';
 import 'package:yening_ecos/features/devices/widgets/device_telemetry_panel.dart';
 import 'package:yening_ecos/features/devices/widgets/telemetry_gauge.dart';
@@ -23,6 +26,48 @@ const _device = UserDevice(
   deviceName: 'EnviroSense Basic',
   serialNumber: 'YEC-ENV-26-000001',
   deviceTypeId: 'envirosense_basic_v1',
+);
+
+DeviceDetails _previewMetadata() => DeviceDetails.fromMaps(
+  documentId: _device.deviceId,
+  deviceData: {
+    'deviceName': _device.deviceName,
+    'serialNumber': _device.serialNumber,
+    'deviceTypeId': _device.deviceTypeId,
+    'status': 'claimed',
+    'provisioningStatus': 'provisioned',
+    'active': true,
+    'schemaVersion': 1,
+    'firmware': {'version': '1.0.0', 'channel': 'stable'},
+    'lifecycle': {'manufacturedAt': DateTime(2026, 9, 1, 10)},
+    'claimedAt': DateTime(2026, 10, 7, 14, 30),
+    'service': {'serviceCount': 0},
+  },
+  typeData: {
+    'deviceTypeName': 'EnviroSense Basic',
+    'description': 'Environmental monitoring for your space.',
+    'version': '1.0.0',
+    'hardware': {
+      'controller': 'ESP32',
+      'board': 'ESP32 Dev Module',
+      'connectivity': ['wifi'],
+    },
+    'telemetry': {
+      for (final metric in ['temperature', 'humidity', 'light'])
+        metric: {
+          'name': metric[0].toUpperCase() + metric.substring(1),
+          'source': {
+            'sensorType': metric == 'light' ? 'ldr' : 'dht22',
+            'interface': metric == 'light' ? 'analog' : 'digital',
+          },
+          'canonicalUnit': metric == 'temperature' ? 'celsius' : 'percent',
+          'supportedUnits': metric == 'temperature'
+              ? ['celsius', 'fahrenheit']
+              : ['percent'],
+          'readOnly': true,
+        },
+    },
+  },
 );
 
 void main() {
@@ -59,7 +104,7 @@ void main() {
   );
 
   testWidgets(
-    'mobile meters group only temperature units and keep humidity and light side by side',
+    'mobile meters have equal dimensions and units belong only to temperature',
     (tester) async {
       await tester.binding.setSurfaceSize(const Size(390, 844));
       addTearDown(() => tester.binding.setSurfaceSize(null));
@@ -97,12 +142,18 @@ void main() {
         ),
         findsNothing,
       );
-      expect(tester.getTopLeft(humidity).dy, tester.getTopLeft(light).dy);
-      expect(tester.getSize(humidity).width, lessThan(180));
-      expect(
-        tester.getSize(temperature).width,
-        greaterThan(tester.getSize(humidity).width),
-      );
+      expect(tester.getSize(temperature), tester.getSize(humidity));
+      expect(tester.getSize(temperature), tester.getSize(light));
+      final value = tester.widget<Text>(find.text('28.5°C'));
+      expect(value.style!.fontSize, 20);
+      expect(value.style!.fontWeight, FontWeight.w700);
+      final semantics = tester.ensureSemantics();
+      try {
+        await tester.pump();
+        await expectLater(tester, meetsGuideline(androidTapTargetGuideline));
+      } finally {
+        semantics.dispose();
+      }
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox());
     },
@@ -148,15 +199,15 @@ void main() {
   testWidgets(
     'light bands agree with the Dark, Low light, and Bright boundary labels',
     (tester) async {
-      for (final light in [0.0, 5.0, 5.1, 20.0, 20.1, 100.0]) {
+      for (final light in [0.0, 23.0, 23.1, 45.0, 45.1, 100.0]) {
         await tester.pumpWidget(panel(DeviceTelemetry(lightPercent: light)));
         await tester.pumpAndSettle();
         final meter = tester.widget<TelemetryGauge>(
           find.byKey(const ValueKey('light-meter')),
         );
-        final expected = light <= 5
+        final expected = light <= 23
             ? meter.lowColor
-            : light <= 20
+            : light <= 45
             ? meter.color
             : meter.highColor;
         expect(meter.readingColor, expected);
@@ -213,10 +264,24 @@ void main() {
       details: false,
     ),
     (
+      name: 'details-phone',
+      size: const Size(390, 844),
+      brightness: Brightness.light,
+      scale: 1.0,
+      details: true,
+    ),
+    (
       name: 'details-large-text',
       size: const Size(320, 1000),
       brightness: Brightness.light,
       scale: 1.5,
+      details: true,
+    ),
+    (
+      name: 'details-largest-text',
+      size: const Size(320, 1200),
+      brightness: Brightness.dark,
+      scale: 2.0,
       details: true,
     ),
   ]) {
@@ -225,23 +290,30 @@ void main() {
       (tester) async {
         await tester.binding.setSurfaceSize(scene.size);
         addTearDown(() => tester.binding.setSurfaceSize(null));
+        final capturedAt = DateTime.now();
         final reading = DeviceTelemetry(
           temperatureCelsius: 28.5,
           humidity: 62.3,
           lightPercent: 78.4,
-          lastSeen: DateTime.now(),
+          temperatureUpdatedAt: capturedAt,
+          humidityUpdatedAt: capturedAt.subtract(const Duration(seconds: 1)),
+          lightUpdatedAt: capturedAt,
+          lastSeen: capturedAt,
           isOnline: true,
           isCloudConnected: true,
         );
         final boundaryKey = GlobalKey();
-        final theme = ThemeData(
-          colorScheme: ColorScheme.fromSeed(
-            seedColor: Colors.green,
-            brightness: scene.brightness,
-          ),
-          fontFamily: _previewFont.isNotEmpty ? 'MeterPreview' : null,
-          useMaterial3: true,
-        );
+        final appTheme = scene.brightness == Brightness.dark
+            ? AppTheme.dark()
+            : AppTheme.light();
+        final theme = _previewFont.isEmpty
+            ? appTheme
+            : appTheme.copyWith(
+                textTheme: appTheme.textTheme.apply(fontFamily: 'MeterPreview'),
+                primaryTextTheme: appTheme.primaryTextTheme.apply(
+                  fontFamily: 'MeterPreview',
+                ),
+              );
         await tester.pumpWidget(
           RepaintBoundary(
             key: boundaryKey,
@@ -256,6 +328,9 @@ void main() {
               home: scene.details
                   ? DeviceDetailsPage(
                       device: _device,
+                      metadataSource: (_) => Stream.value(
+                        DeviceDetailsState.ready(_previewMetadata()),
+                      ),
                       telemetrySource: (_) => Stream.value(reading),
                       unitPreference: units,
                     )
@@ -302,7 +377,27 @@ void main() {
         expect(find.text('62.3%'), findsOneWidget);
         expect(find.text('78.4%'), findsOneWidget);
         expect(find.byType(TemperatureUnitSelector), findsOneWidget);
+        final heartbeatBottom = tester
+            .getBottomLeft(find.byKey(const ValueKey('telemetry-updated-time')))
+            .dy;
+        for (final key in [
+          'temperature-meter',
+          'humidity-meter',
+          'light-meter',
+        ]) {
+          expect(
+            heartbeatBottom,
+            lessThan(tester.getTopLeft(find.byKey(ValueKey(key))).dy),
+            reason: 'connection time stays in the header above all readings',
+          );
+        }
         expect(tester.takeException(), isNull);
+        final meterSizes = [
+          'temperature-meter',
+          'humidity-meter',
+          'light-meter',
+        ].map((key) => tester.getSize(find.byKey(ValueKey(key))));
+        expect(meterSizes.toSet(), hasLength(1));
         if (scene.name == 'home-tablet') {
           final temperature = tester.getTopLeft(
             find.byKey(const ValueKey('temperature-meter')),
@@ -334,6 +429,40 @@ void main() {
               image.dispose();
             }
           });
+        }
+        if (scene.name == 'details-phone') {
+          await tester.scrollUntilVisible(
+            find.text('Environmental monitoring for your space.'),
+            200,
+          );
+          await Scrollable.ensureVisible(
+            tester.element(
+              find.text('Environmental monitoring for your space.'),
+            ),
+            alignment: 0.04,
+          );
+          await tester.pumpAndSettle();
+          expect(find.text('About this device'), findsOneWidget);
+          expect(find.text('Claimed'), findsOneWidget);
+          expect(find.text('Provisioned'), findsOneWidget);
+          expect(tester.takeException(), isNull);
+          if (_previewDirectory.isNotEmpty) {
+            await tester.runAsync(() async {
+              final boundary =
+                  boundaryKey.currentContext!.findRenderObject()!
+                      as RenderRepaintBoundary;
+              final image = await boundary.toImage(pixelRatio: 2);
+              try {
+                final bytes = await image.toByteData(
+                  format: ui.ImageByteFormat.png,
+                );
+                await File('$_previewDirectory/details-metadata-phone.png')
+                    .writeAsBytes(bytes!.buffer.asUint8List());
+              } finally {
+                image.dispose();
+              }
+            });
+          }
         }
         await tester.pumpWidget(const SizedBox());
       },

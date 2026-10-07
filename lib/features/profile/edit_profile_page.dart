@@ -266,7 +266,7 @@ class _EditProfilePageState extends State<EditProfilePage> {
 
         final shouldDiscard = await _confirmDiscardChanges();
 
-        if (!mounted || !shouldDiscard) {
+        if (!context.mounted || !shouldDiscard) {
           return;
         }
 

@@ -9,12 +9,12 @@ void main() {
     () {
       for (final entry in <double, String>{
         0: 'Dark',
-        4.9: 'Dark',
-        5: 'Dark',
-        5.1: 'Low light',
-        19.9: 'Low light',
-        20: 'Low light',
-        20.1: 'Bright',
+        22.9: 'Dark',
+        23: 'Dark',
+        23.1: 'Low light',
+        44.9: 'Low light',
+        45: 'Low light',
+        45.1: 'Bright',
         100: 'Bright',
       }.entries) {
         expect(
@@ -37,8 +37,231 @@ void main() {
     expect(result.humidity, 61.5);
     expect(result.lightPercent, 43.2);
     expect(result.lastSeen!.millisecondsSinceEpoch, 1700000000000);
+    expect(result.temperatureUpdatedAt, result.lastSeen);
+    expect(result.humidityUpdatedAt, result.lastSeen);
+    expect(result.lightUpdatedAt, result.lastSeen);
     expect(result.isOnline, isTrue);
   });
+
+  test('parses independent value and update time pairs for all sensors', () {
+    const startedAt = 1700000000000;
+    final result = DeviceTelemetry.fromValue({
+      'telemetry': {
+        'temperature': {'value': 25, 'updatedAt': startedAt},
+        'humidity': {'value': 61.5, 'updatedAt': startedAt + 100},
+        'light': {'value': 43.2, 'updatedAt': startedAt + 200},
+      },
+      'connectivity': {'isOnline': true, 'lastSeen': startedAt + 300},
+    });
+    expect(result.temperatureCelsius, 25);
+    expect(result.humidity, 61.5);
+    expect(result.lightPercent, 43.2);
+    expect(result.temperatureUpdatedAt!.millisecondsSinceEpoch, startedAt);
+    expect(result.humidityUpdatedAt!.millisecondsSinceEpoch, startedAt + 100);
+    expect(result.lightUpdatedAt!.millisecondsSinceEpoch, startedAt + 200);
+    expect(result.lastSeen!.millisecondsSinceEpoch, startedAt + 300);
+    expect(result.temperatureUpdatedAt!.isUtc, isTrue);
+  });
+
+  test(
+    'mixed rollout records keep scalar readings without inferring update times',
+    () {
+      const startedAt = 1700000000000;
+      final result = DeviceTelemetry.fromValue({
+        'telemetry': {
+          'temperature': 25,
+          'humidity': {'value': 61.5, 'updatedAt': startedAt - 2000},
+          'light': {'value': 43.2},
+        },
+        'connectivity': {'isOnline': true, 'lastSeen': startedAt},
+      });
+      expect(result.temperatureCelsius, 25);
+      expect(result.temperatureUpdatedAt, isNull);
+      expect(result.humidity, 61.5);
+      expect(
+        result.humidityUpdatedAt!.millisecondsSinceEpoch,
+        startedAt - 2000,
+      );
+      expect(result.lightPercent, isNull);
+      expect(result.lightUpdatedAt, isNull);
+    },
+  );
+
+  test(
+    'malformed sensor pairs cannot borrow a healthy heartbeat timestamp',
+    () {
+      const validTime = 1700000000000;
+      for (final invalidTime in [
+        null,
+        0,
+        -1,
+        1700000000000.5,
+        8640000000000001,
+        '1700000000000',
+        true,
+        double.nan,
+        double.infinity,
+        {'.sv': 'timestamp'},
+      ]) {
+        final result = DeviceTelemetry.fromValue({
+          'telemetry': {
+            'temperature': {'value': 25, 'updatedAt': invalidTime},
+            'humidity': {'value': 61.5, 'updatedAt': invalidTime},
+            'light': {'value': 43.2, 'updatedAt': invalidTime},
+          },
+          'connectivity': {'isOnline': true, 'lastSeen': validTime},
+        });
+        expect(result.hasReadings, isFalse, reason: 'timestamp: $invalidTime');
+        expect(result.temperatureUpdatedAt, isNull);
+        expect(result.humidityUpdatedAt, isNull);
+        expect(result.lightUpdatedAt, isNull);
+        expect(result.lastSeen!.millisecondsSinceEpoch, validTime);
+      }
+      for (final invalidPair in [
+        null,
+        [],
+        <String, Object?>{},
+        {'updatedAt': validTime},
+        {'value': null, 'updatedAt': validTime},
+        {'value': '25', 'updatedAt': validTime},
+        {'value': double.nan, 'updatedAt': validTime},
+      ]) {
+        final result = DeviceTelemetry.fromValue({
+          'telemetry': {
+            'temperature': invalidPair,
+            'humidity': invalidPair,
+            'light': invalidPair,
+          },
+          'connectivity': {'lastSeen': validTime},
+        });
+        expect(result.hasReadings, isFalse, reason: 'record: $invalidPair');
+        expect(result.temperatureUpdatedAt, isNull);
+        expect(result.humidityUpdatedAt, isNull);
+        expect(result.lightUpdatedAt, isNull);
+      }
+    },
+  );
+
+  test(
+    'seed heartbeat zero remains parseable without making sensor records valid',
+    () {
+      final result = DeviceTelemetry.fromValue({
+        'telemetry': {
+          'temperature': {'value': 25, 'updatedAt': 0},
+        },
+        'connectivity': {'isOnline': false, 'lastSeen': 0},
+      });
+      expect(result.lastSeen!.millisecondsSinceEpoch, 0);
+      expect(result.temperatureCelsius, isNull);
+      expect(result.temperatureUpdatedAt, isNull);
+      expect(result.hasReadings, isFalse);
+    },
+  );
+
+  test('legacy and independent readings enforce physical sensor ranges', () {
+    for (final nested in [false, true]) {
+      Object record(double value) =>
+          nested ? {'value': value, 'updatedAt': 1700000000000} : value;
+      for (final values in [
+        [-40.1, -0.1, -0.1],
+        [80.1, 100.1, 100.1],
+        [double.infinity, double.infinity, double.infinity],
+      ]) {
+        final result = DeviceTelemetry.fromValue({
+          'telemetry': {
+            'temperature': record(values[0]),
+            'humidity': record(values[1]),
+            'light': record(values[2]),
+          },
+        });
+        expect(result.hasReadings, isFalse);
+        expect(result.temperatureUpdatedAt, isNull);
+        expect(result.humidityUpdatedAt, isNull);
+        expect(result.lightUpdatedAt, isNull);
+      }
+      for (final values in [
+        [-40.0, 0.0, 0.0],
+        [80.0, 100.0, 100.0],
+      ]) {
+        final result = DeviceTelemetry.fromValue({
+          'telemetry': {
+            'temperature': record(values[0]),
+            'humidity': record(values[1]),
+            'light': record(values[2]),
+          },
+        });
+        expect(result.temperatureCelsius, values[0]);
+        expect(result.humidity, values[1]);
+        expect(result.lightPercent, values[2]);
+      }
+    }
+  });
+
+  test('a healthy device heartbeat cannot refresh one stale sensor', () {
+    final now = DateTime.utc(2026, 10, 7, 12);
+    final reading = DeviceTelemetry(
+      temperatureCelsius: 25,
+      humidity: 61.5,
+      lightPercent: 43.2,
+      temperatureUpdatedAt: now.subtract(const Duration(seconds: 61)),
+      humidityUpdatedAt: now.subtract(const Duration(seconds: 2)),
+      lightUpdatedAt: now,
+      lastSeen: now,
+      isOnline: true,
+      isCloudConnected: true,
+    );
+    expect(reading.isFreshAt(now), isTrue);
+    expect(reading.isTemperatureFreshAt(now), isFalse);
+    expect(reading.isHumidityFreshAt(now), isTrue);
+    expect(reading.isLightFreshAt(now), isTrue);
+    expect(
+      reading.isHumidityFreshAt(now.add(const Duration(seconds: 59))),
+      isFalse,
+    );
+    expect(
+      reading.isLightFreshAt(now.add(const Duration(seconds: 61))),
+      isFalse,
+    );
+  });
+
+  test(
+    'sensor freshness requires a valid reading, its own time and connection',
+    () {
+      final now = DateTime.utc(2026, 10, 7, 12);
+      for (final record in [
+        DeviceTelemetry(temperatureUpdatedAt: now),
+        DeviceTelemetry(temperatureCelsius: 25, lastSeen: now),
+        DeviceTelemetry(
+          temperatureCelsius: double.nan,
+          temperatureUpdatedAt: now,
+        ),
+        DeviceTelemetry(temperatureCelsius: 80.1, temperatureUpdatedAt: now),
+        DeviceTelemetry(
+          temperatureCelsius: 25,
+          temperatureUpdatedAt: now,
+          isOnline: false,
+        ),
+        DeviceTelemetry(
+          temperatureCelsius: 25,
+          temperatureUpdatedAt: now,
+          isCloudConnected: false,
+        ),
+        DeviceTelemetry(
+          temperatureCelsius: 25,
+          temperatureUpdatedAt: now.add(const Duration(seconds: 31)),
+        ),
+      ]) {
+        expect(record.isTemperatureFreshAt(now), isFalse);
+      }
+      expect(
+        DeviceTelemetry(
+          temperatureCelsius: 25,
+          temperatureUpdatedAt: now.add(const Duration(seconds: 30)),
+        ).isTemperatureFreshAt(now),
+        isTrue,
+      );
+    },
+  );
 
   test('light-only readings accept zero and reject invalid percentages', () {
     for (final value in [0, 53.2, 100]) {

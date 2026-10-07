@@ -13,9 +13,18 @@
         "lastSeen": 0
       },
       "telemetry": {
-        "temperature": null,
-        "humidity": null,
-        "light": null
+        "temperature": {
+          "value": null,
+          "updatedAt": null
+        },
+        "humidity": {
+          "value": null,
+          "updatedAt": null
+        },
+        "light": {
+          "value": null,
+          "updatedAt": null
+        }
       }
     }
   }

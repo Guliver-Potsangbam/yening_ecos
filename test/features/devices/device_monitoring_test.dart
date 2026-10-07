@@ -9,6 +9,7 @@ import 'package:yening_ecos/features/devices/device_details_page.dart';
 import 'package:yening_ecos/features/devices/devices_page.dart';
 import 'package:yening_ecos/features/devices/models/device_telemetry.dart';
 import 'package:yening_ecos/features/devices/models/user_device.dart';
+import 'package:yening_ecos/features/devices/services/device_details_service.dart';
 import 'package:yening_ecos/features/devices/services/user_devices_service.dart';
 import 'package:yening_ecos/features/devices/widgets/device_telemetry_panel.dart';
 import 'package:yening_ecos/features/devices/widgets/telemetry_gauge.dart';
@@ -166,8 +167,8 @@ void main() {
       expect(find.text('61.5%'), findsOneWidget);
       expect(find.text('43.2%'), findsOneWidget);
       expect(find.text('Light'), findsOneWidget);
-      expect(find.text('Bright'), findsOneWidget);
-      expect(find.text('Live'), findsOneWidget);
+      expect(find.text('Low light'), findsOneWidget);
+      expect(find.text('Device online'), findsOneWidget);
       await tester.tap(find.text('°F'));
       await tester.pumpAndSettle();
       expect(find.text('77.0°F'), findsOneWidget);
@@ -308,7 +309,7 @@ void main() {
   );
 
   testWidgets(
-    'light label follows each five-second reading and clears when missing',
+    'light label follows each two-second reading and clears when missing',
     (tester) async {
       final readings = StreamController<DeviceTelemetry>.broadcast();
       addTearDown(() => readings.close());
@@ -326,15 +327,15 @@ void main() {
       final semantics = tester.ensureSemantics();
       for (final entry in <double, String>{
         0: 'Dark',
-        5: 'Dark',
-        5.1: 'Low light',
-        20: 'Low light',
-        20.1: 'Bright',
+        23: 'Dark',
+        23.1: 'Low light',
+        45: 'Low light',
+        45.1: 'Bright',
         100: 'Bright',
       }.entries) {
         readings.add(DeviceTelemetry(lightPercent: entry.key));
         await tester.pump();
-        await tester.pump(const Duration(seconds: 5));
+        await tester.pump(const Duration(seconds: 2));
         expect(find.text(entry.value), findsOneWidget);
         expect(
           find.bySemanticsLabel(
@@ -375,12 +376,16 @@ void main() {
     );
     final startedAt = DateTime(2026, 10, 7, 14, 30);
     for (var tick = 0; tick < 3; tick++) {
+      final updatedAt = startedAt.add(Duration(seconds: tick * 2));
       readings.add(
         DeviceTelemetry(
           temperatureCelsius: 28.5,
           humidity: 62.3,
           lightPercent: 0,
-          lastSeen: startedAt.add(Duration(seconds: tick * 5)),
+          temperatureUpdatedAt: updatedAt,
+          humidityUpdatedAt: updatedAt,
+          lightUpdatedAt: updatedAt,
+          lastSeen: updatedAt,
           isOnline: true,
         ),
       );
@@ -392,10 +397,203 @@ void main() {
         tester
             .widget<Text>(find.byKey(const ValueKey('telemetry-updated-time')))
             .data,
-        'Last update: 14:30:${(tick * 5).toString().padLeft(2, '0')}',
+        'Device seen: 2:30:${(tick * 2).toString().padLeft(2, '0')} PM',
       );
-      await tester.pump(const Duration(seconds: 5));
+      for (final metric in ['temperature', 'humidity', 'light']) {
+        expect(
+          tester
+              .widget<Text>(find.byKey(ValueKey('$metric-updated-time')))
+              .data,
+          'Updated 2:30:${(tick * 2).toString().padLeft(2, '0')} PM',
+        );
+      }
+      await tester.pump(const Duration(seconds: 2));
     }
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('each sensor retains its own time when only light updates', (
+    tester,
+  ) async {
+    final readings = StreamController<DeviceTelemetry>.broadcast();
+    addTearDown(() => readings.close());
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SingleChildScrollView(
+            child: DeviceTelemetryPanel(
+              deviceId: device.deviceId,
+              telemetrySource: (_) => readings.stream,
+              unitPreference: units,
+            ),
+          ),
+        ),
+      ),
+    );
+    final temperatureAt = DateTime(2026, 10, 7, 9, 41);
+    final humidityAt = temperatureAt.add(const Duration(seconds: 1));
+    final lightAt = temperatureAt.add(const Duration(seconds: 2));
+    for (var tick = 0; tick < 2; tick++) {
+      final latestLightAt = lightAt.add(Duration(seconds: tick * 2));
+      readings.add(
+        DeviceTelemetry.fromValue({
+          'telemetry': {
+            'temperature': {
+              'value': 24,
+              'updatedAt': temperatureAt.millisecondsSinceEpoch,
+            },
+            'humidity': {
+              'value': 60,
+              'updatedAt': humidityAt.millisecondsSinceEpoch,
+            },
+            'light': {
+              'value': tick == 0 ? 40 : 75,
+              'updatedAt': latestLightAt.millisecondsSinceEpoch,
+            },
+          },
+          'connectivity': {
+            'isOnline': true,
+            'lastSeen': latestLightAt.millisecondsSinceEpoch,
+          },
+        }),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('24.0°C'), findsOneWidget);
+      expect(find.text('60.0%'), findsOneWidget);
+      expect(
+        tester
+            .widget<Text>(
+              find.byKey(const ValueKey('temperature-updated-time')),
+            )
+            .data,
+        'Updated 9:41:00 AM',
+      );
+      expect(
+        tester
+            .widget<Text>(find.byKey(const ValueKey('humidity-updated-time')))
+            .data,
+        'Updated 9:41:01 AM',
+      );
+      expect(
+        tester
+            .widget<Text>(find.byKey(const ValueKey('light-updated-time')))
+            .data,
+        'Updated 9:41:0${2 + tick * 2} AM',
+      );
+    }
+    expect(find.text('75.0%'), findsOneWidget);
+    await tester.tap(find.text('°F'));
+    await tester.pumpAndSettle();
+    expect(find.text('75.2°F'), findsOneWidget);
+    expect(
+      tester
+          .widget<Text>(find.byKey(const ValueKey('temperature-updated-time')))
+          .data,
+      'Updated 9:41:00 AM',
+      reason: 'changing display units cannot refresh a sensor timestamp',
+    );
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('sensor update times use local 12-hour midnight and noon', (
+    tester,
+  ) async {
+    final readings = StreamController<DeviceTelemetry>.broadcast();
+    addTearDown(() => readings.close());
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SingleChildScrollView(
+            child: DeviceTelemetryPanel(
+              deviceId: device.deviceId,
+              telemetrySource: (_) => readings.stream,
+              unitPreference: units,
+            ),
+          ),
+        ),
+      ),
+    );
+    for (final entry in [
+      (stamp: DateTime(2026, 10, 7, 0, 0, 4), clock: '12:00:04 AM'),
+      (stamp: DateTime(2026, 10, 7, 12, 0, 4), clock: '12:00:04 PM'),
+    ]) {
+      // The database model uses UTC; these instants must render in local time.
+      final utc = entry.stamp.toUtc();
+      readings.add(
+        DeviceTelemetry(
+          temperatureCelsius: 24,
+          humidity: 60,
+          lightPercent: 40,
+          temperatureUpdatedAt: utc,
+          humidityUpdatedAt: utc,
+          lightUpdatedAt: utc,
+          lastSeen: utc,
+        ),
+      );
+      await tester.pumpAndSettle();
+      for (final metric in ['temperature', 'humidity', 'light']) {
+        expect(
+          tester
+              .widget<Text>(find.byKey(ValueKey('$metric-updated-time')))
+              .data,
+          'Updated ${entry.clock}',
+        );
+      }
+    }
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('a live sibling and heartbeat cannot refresh a stale sensor', (
+    tester,
+  ) async {
+    final capturedAt = DateTime.now();
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SingleChildScrollView(
+            child: DeviceTelemetryPanel(
+              deviceId: device.deviceId,
+              telemetrySource: (_) => Stream.value(
+                DeviceTelemetry(
+                  temperatureCelsius: 24,
+                  humidity: 60,
+                  lightPercent: 75,
+                  temperatureUpdatedAt: capturedAt.subtract(
+                    const Duration(minutes: 2),
+                  ),
+                  humidityUpdatedAt: capturedAt,
+                  lightUpdatedAt: capturedAt,
+                  lastSeen: capturedAt,
+                  isOnline: true,
+                  isCloudConnected: true,
+                ),
+              ),
+              unitPreference: units,
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('temperature-meter')),
+        matching: find.text('Stale'),
+      ),
+      findsOneWidget,
+    );
+    for (final metric in ['humidity', 'light']) {
+      expect(
+        find.descendant(
+          of: find.byKey(ValueKey('$metric-meter')),
+          matching: find.text('Live'),
+        ),
+        findsOneWidget,
+      );
+    }
+    expect(find.text('24.0°C'), findsOneWidget);
+    expect(find.text('60.0%'), findsOneWidget);
+    expect(find.text('75.0%'), findsOneWidget);
     await tester.pumpWidget(const SizedBox());
   });
 
@@ -454,6 +652,8 @@ void main() {
           child: Scaffold(
             body: DeviceDetailsPage(
               device: device,
+              metadataSource: (_) =>
+                  Stream.value(const DeviceDetailsState.unavailable()),
               telemetrySource: (_) => Stream.value(
                 const DeviceTelemetry(
                   temperatureCelsius: -40,
@@ -498,7 +698,27 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(find.text('25.0°C'), findsOneWidget);
-    await tester.tap(find.text('EnviroSense Basic'));
+    // Home's card is now informational. Open the details route directly to
+    // exercise the shared preference while Home remains underneath it.
+    unawaited(
+      Navigator.of(tester.element(find.byType(HomePage))).push(
+        MaterialPageRoute<void>(
+          builder: (_) => DeviceDetailsPage(
+            device: device,
+            metadataSource: (_) =>
+                Stream.value(const DeviceDetailsState.unavailable()),
+            telemetrySource: (_) => Stream.value(
+              DeviceTelemetry(
+                temperatureCelsius: 25,
+                humidity: 50,
+                lastSeen: DateTime.now(),
+              ),
+            ),
+            unitPreference: units,
+          ),
+        ),
+      ),
+    );
     await tester.pumpAndSettle();
     expect(find.byType(DeviceDetailsPage), findsOneWidget);
     await tester.tap(find.text('°F'));

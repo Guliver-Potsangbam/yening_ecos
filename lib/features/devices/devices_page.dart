@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../device_setup/add_device_page.dart';
 import '../../widgets/app_empty_state.dart';
 import '../../core/preferences/temperature_unit_preference.dart';
+import '../../core/ui/monitoring_background.dart';
 import 'device_details_page.dart';
 import 'models/user_device.dart';
 import 'services/device_telemetry_service.dart';
@@ -73,107 +74,109 @@ class _DevicesPageState extends State<DevicesPage> {
         icon: const Icon(Icons.add_rounded),
         label: const Text('Add Device'),
       ),
-      body: SafeArea(
-        child: CustomScrollView(
-          key: const PageStorageKey('devices-list'),
-          slivers: [
-            SliverToBoxAdapter(
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(16, 16, 16, 18),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Your devices',
-                      style: theme.textTheme.headlineSmall?.copyWith(
-                        fontWeight: FontWeight.w700,
-                        letterSpacing: -0.4,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      'All your devices, in one place.',
-                      style: theme.textTheme.bodyMedium?.copyWith(
-                        color: theme.colorScheme.onSurfaceVariant,
-                        height: 1.45,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            StreamBuilder<UserDevicesState>(
-              stream: _devices,
-              builder: (context, snapshot) {
-                Widget? message;
-                if (snapshot.hasError) {
-                  message = Card(
-                    child: Padding(
-                      padding: const EdgeInsets.all(20),
-                      child: Column(
-                        children: [
-                          const Text(
-                            'Unable to load your devices. Check your internet connection.',
-                          ),
-                          const SizedBox(height: 12),
-                          FilledButton(
-                            onPressed: () => setState(_watchDevices),
-                            child: const Text('Retry'),
-                          ),
-                        ],
-                      ),
-                    ),
-                  );
-                } else if (!snapshot.hasData || snapshot.data!.isLoading) {
-                  message = const Center(child: CircularProgressIndicator());
-                } else if (snapshot.data!.devices.isEmpty) {
-                  message = const AppEmptyState(
-                    icon: Icons.devices_other_rounded,
-                    title: 'No devices connected',
-                    description: 'Your devices will appear here after you complete the setup process.',
-                  );
-                }
-                if (message != null) {
-                  return SliverPadding(
-                    padding: const EdgeInsets.symmetric(horizontal: 20),
-                    sliver: SliverToBoxAdapter(child: message),
-                  );
-                }
-                final devices = snapshot.data!.devices;
-                return SliverPadding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  sliver: SliverList.builder(
-                    itemCount: devices.length,
-                    itemBuilder: (context, index) {
-                      final device = devices[index];
-                      return Padding(
-                        padding: const EdgeInsets.only(bottom: 10),
-                        child: UserDeviceCard(
-                          key: ValueKey(device.deviceId),
-                          device: device,
-                          onTap: () => _openDevice(device),
+      body: MonitoringBackground(
+        child: SafeArea(
+          child: CustomScrollView(
+            key: const PageStorageKey('devices-list'),
+            slivers: [
+              SliverToBoxAdapter(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 18),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Your devices',
+                        style: theme.textTheme.headlineSmall?.copyWith(
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: -0.4,
                         ),
-                      );
-                    },
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        'All your devices, in one place.',
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
+                          height: 1.45,
+                        ),
+                      ),
+                    ],
                   ),
-                );
-              },
-            ),
-            const SliverToBoxAdapter(
-              child: Padding(
-                padding: EdgeInsets.fromLTRB(20, 20, 20, 112),
-                child: _DeviceSetupInfoCard(
-                  title: 'How device setup works',
-                  steps: [
-                    'Put your device into setup mode.',
-                    'Connect your phone to the device.',
-                    'Configure its Wi-Fi connection.',
-                    'Finish setup and start monitoring.',
-                  ],
                 ),
               ),
-            ),
-          ],
+              StreamBuilder<UserDevicesState>(
+                stream: _devices,
+                builder: (context, snapshot) {
+                  Widget? message;
+                  if (snapshot.hasError) {
+                    message = Card(
+                      child: Padding(
+                        padding: const EdgeInsets.all(20),
+                        child: Column(
+                          children: [
+                            const Text(
+                              'Unable to load your devices. Check your internet connection.',
+                            ),
+                            const SizedBox(height: 12),
+                            FilledButton(
+                              onPressed: () => setState(_watchDevices),
+                              child: const Text('Retry'),
+                            ),
+                          ],
+                        ),
+                      ),
+                    );
+                  } else if (!snapshot.hasData || snapshot.data!.isLoading) {
+                    message = const Center(child: CircularProgressIndicator());
+                  } else if (snapshot.data!.devices.isEmpty) {
+                    message = const AppEmptyState(
+                      icon: Icons.devices_other_rounded,
+                      title: 'No devices connected',
+                      description: 'Your devices will appear here after you complete the setup process.',
+                    );
+                  }
+                  if (message != null) {
+                    return SliverPadding(
+                      padding: const EdgeInsets.symmetric(horizontal: 20),
+                      sliver: SliverToBoxAdapter(child: message),
+                    );
+                  }
+                  final devices = snapshot.data!.devices;
+                  return SliverPadding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    sliver: SliverList.builder(
+                      itemCount: devices.length,
+                      itemBuilder: (context, index) {
+                        final device = devices[index];
+                        return Padding(
+                          padding: const EdgeInsets.only(bottom: 10),
+                          child: UserDeviceCard(
+                            key: ValueKey(device.deviceId),
+                            device: device,
+                            onTap: () => _openDevice(device),
+                          ),
+                        );
+                      },
+                    ),
+                  );
+                },
+              ),
+              const SliverToBoxAdapter(
+                child: Padding(
+                  padding: EdgeInsets.fromLTRB(20, 20, 20, 112),
+                  child: _DeviceSetupInfoCard(
+                    title: 'How device setup works',
+                    steps: [
+                      'Put your device into setup mode.',
+                      'Connect your phone to the device.',
+                      'Configure its Wi-Fi connection.',
+                      'Finish setup and start monitoring.',
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );

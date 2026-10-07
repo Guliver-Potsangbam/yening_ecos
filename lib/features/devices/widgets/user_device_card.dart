@@ -19,7 +19,7 @@ class UserDeviceCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return Card(
+    final identity = Card(
       elevation: 0,
       margin: EdgeInsets.zero,
       color: theme.colorScheme.surfaceContainerLowest,
@@ -33,7 +33,7 @@ class UserDeviceCard extends StatelessWidget {
       child: InkWell(
         onTap: onTap,
         child: Padding(
-          padding: const EdgeInsets.all(14),
+          padding: const EdgeInsets.all(12),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -41,11 +41,11 @@ class UserDeviceCard extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Container(
-                    width: 38,
-                    height: 38,
+                    width: 42,
+                    height: 42,
                     decoration: BoxDecoration(
                       color: theme.colorScheme.primary.withValues(alpha: 0.08),
-                      borderRadius: BorderRadius.circular(12),
+                      borderRadius: BorderRadius.circular(14),
                     ),
                     child: Icon(
                       Icons.sensors_rounded,
@@ -94,16 +94,15 @@ class UserDeviceCard extends StatelessWidget {
                     ),
                 ],
               ),
-              if (telemetry != null) ...[
-                const SizedBox(height: 14),
-                const Divider(height: 1),
-                const SizedBox(height: 14),
-                telemetry!,
-              ],
             ],
           ),
         ),
       ),
+    );
+    if (telemetry == null) return identity;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [identity, const SizedBox(height: 14), telemetry!],
     );
   }
 }

@@ -5,6 +5,7 @@
 #include <Firebase_ESP_Client.h>
 #include <DHT.h>
 #include <esp_wifi.h>
+#include <esp_system.h>
 #include <cstring>
 #include <freertos/FreeRTOS.h>
 #include <freertos/event_groups.h>
@@ -15,6 +16,7 @@
 #include "firebase_secrets.h"
 #include "light_sensor.h"
 #include "telemetry_schedule.h"
+#include "task_watchdog.h"
 #include "wifi_scan_api.h"
 #include "portal_ui.h"
 
@@ -28,10 +30,13 @@ DHT dht(DHT_DATA_PIN, DHT22);
 FirebaseData firebaseData;
 FirebaseAuth firebaseAuth;
 FirebaseConfig firebaseConfig;
-QueueHandle_t telemetryQueue = nullptr;
+QueueHandle_t telemetryQueues[TELEMETRY_METRIC_COUNT] = {};
 EventGroupHandle_t telemetryConnection = nullptr;
 constexpr EventBits_t TELEMETRY_CONNECTED = BIT0;
-TelemetrySchedule telemetrySchedule(SENSOR_UPLOAD_INTERVAL_MS);
+TelemetrySchedule dhtSchedule(SENSOR_UPLOAD_INTERVAL_MS, DHT_MINIMUM_READ_INTERVAL_MS);
+TelemetrySchedule lightSchedule(SENSOR_UPLOAD_INTERVAL_MS);
+bool watchdogConfigured = false;
+bool loopWatchdogSubscribed = false;
 
 const IPAddress setupIP(192, 168, 4, 1);
 const IPAddress setupSubnet(255, 255, 255, 0);
@@ -420,7 +425,7 @@ void initializeFirebase() {
   // TLS client instead (its public API takes seconds).
   firebaseData.getWiFiClient()->setHandshakeTimeout(FIREBASE_HANDSHAKE_TIMEOUT_SECONDS);
   firebaseData.keepAlive(15, 5, 3);
-  // One confirmed attempt per snapshot; never retry old readings in a backlog.
+  // One confirmed attempt per metric; never retry old readings in a backlog.
   Firebase.RTDB.setMaxRetry(&firebaseData, 0);
   Firebase.reconnectWiFi(true);
   Firebase.begin(&firebaseConfig, &firebaseAuth);
@@ -438,8 +443,16 @@ float readLightAdc() {
   return static_cast<float>(total) / LDR_SAMPLE_COUNT;
 }
 
+void queueMetricReading(TelemetryMetric metric, float value, uint32_t sampledAt,
+    float rawAdc = NAN) {
+  const MetricReading reading = {value, rawAdc, sampledAt};
+  xQueueOverwrite(telemetryQueues[static_cast<uint8_t>(metric)], &reading);
+  Serial.printf("%s sample captured at %lu ms.\n", telemetryMetricName(metric),
+      static_cast<unsigned long>(sampledAt));
+}
+
 void processSensorSampling() {
-  if (telemetryQueue == nullptr || telemetryConnection == nullptr) return;
+  if (telemetryConnection == nullptr) return;
   const bool connected = !portalRunning && WiFi.status() == WL_CONNECTED &&
       provisioningState == ProvisioningState::Connected;
   const bool previouslyConnected =
@@ -447,126 +460,141 @@ void processSensorSampling() {
   if (!connected) {
     if (previouslyConnected) {
       xEventGroupClearBits(telemetryConnection, TELEMETRY_CONNECTED);
-      xQueueReset(telemetryQueue);
+      for (QueueHandle_t queue : telemetryQueues) xQueueReset(queue);
     }
     return;
   }
   if (!previouslyConnected) {
-    telemetrySchedule.reset(millis(), true);
+    dhtSchedule.reset(millis(), true);
+    lightSchedule.reset(millis(), true);
     xEventGroupSetBits(telemetryConnection, TELEMETRY_CONNECTED);
   }
-  if (!telemetrySchedule.due(millis())) return;
-  TelemetrySample sample;
-  sample.sampledAt = millis();
-  // Force a fresh DHT22 frame; humidity then uses that same cached frame.
-  sample.temperature = dht.readTemperature(false, true);
-  sample.humidity = dht.readHumidity();
-  sample.lightAdc = readLightAdc();
-  sample.lightPercent = lightPercentFromAdc(sample.lightAdc, LDR_DARK_ADC, LDR_BRIGHT_ADC);
-  // Firebase operations run elsewhere. A slow connection cannot delay sampling
-  // or build a backlog of stale uploads: the one-slot queue retains the latest.
-  xQueueOverwrite(telemetryQueue, &sample);
-  Serial.print("Sensor sample captured at ");
-  Serial.print(sample.sampledAt);
-  Serial.println(" ms.");
+  if (dhtSchedule.due(millis())) {
+    const uint32_t sampledAt = millis();
+    // One DHT22 frame supplies both measurements. Each gets its own queue and
+    // cloud record; the physical sensor's two-second cooldown is still enforced.
+    const float temperature = dht.readTemperature(false, true);
+    const float humidity = dht.readHumidity();
+    queueMetricReading(TelemetryMetric::Temperature, temperature, sampledAt);
+    queueMetricReading(TelemetryMetric::Humidity, humidity, sampledAt);
+  }
+  // Light has its own capture schedule; a missing DHT frame cannot postpone it.
+  if (lightSchedule.due(millis())) {
+    const uint32_t sampledAt = millis();
+    const float rawAdc = readLightAdc();
+    queueMetricReading(TelemetryMetric::Light,
+        lightPercentFromAdc(rawAdc, LDR_DARK_ADC, LDR_BRIGHT_ADC), sampledAt, rawAdc);
+  }
 }
 
-void logFirebaseServerTiming() {
-  FirebaseJsonData heartbeat;
-  firebaseData.jsonObject().get(heartbeat, "connectivity/lastSeen");
-  const bool numeric = heartbeat.typeNum == FirebaseJson::JSON_INT ||
-      heartbeat.typeNum == FirebaseJson::JSON_FLOAT ||
-      heartbeat.typeNum == FirebaseJson::JSON_DOUBLE;
-  if (!heartbeat.success || !numeric) {
-    Serial.println("Upload confirmed, but the response did not include a server timestamp.");
+void logFirebaseServerTiming(TelemetryMetric metric) {
+  FirebaseJsonData updatedAt;
+  const String field = String("telemetry/") + telemetryMetricName(metric);
+  FirebaseJson &response = firebaseData.jsonObject();
+  // RTDB normally normalizes the multi-location write response to nested JSON.
+  response.get(updatedAt, (field + "/updatedAt").c_str());
+  if (!updatedAt.success) {
+    // Also accept an echoed literal slash-separated key without interpreting
+    // that key as a FirebaseJson path.
+    const size_t count = response.iteratorBegin();
+    for (size_t index = 0; index < count; ++index) {
+      int type;
+      String key, value;
+      response.iteratorGet(index, type, key, value);
+      if (key != field) continue;
+      FirebaseJson record;
+      record.setJsonData(value);
+      record.get(updatedAt, "updatedAt");
+      break;
+    }
+    response.iteratorEnd();
+  }
+  const bool numeric = updatedAt.typeNum == FirebaseJson::JSON_INT ||
+      updatedAt.typeNum == FirebaseJson::JSON_FLOAT ||
+      updatedAt.typeNum == FirebaseJson::JSON_DOUBLE;
+  if (!updatedAt.success || !numeric) {
+    Serial.println("Metric upload confirmed, but the response did not include updatedAt.");
     return;
   }
-  const double serverSeen = heartbeat.to<double>();
+  const double serverSeen = updatedAt.to<double>();
   if (!isfinite(serverSeen) || serverSeen <= 0) {
     Serial.println("Upload confirmed, but the server timestamp was invalid.");
     return;
   }
-  static double previousServerSeen = 0;
-  Serial.printf("RTDB server lastSeen: %.0f ms.\n", serverSeen);
-  if (previousServerSeen > 0 && serverSeen >= previousServerSeen) {
-    Serial.printf("Interval between RTDB server updates: %.0f ms (target: %lu ms).\n",
-        serverSeen - previousServerSeen, static_cast<unsigned long>(SENSOR_UPLOAD_INTERVAL_MS));
+  static double previousServerSeen[TELEMETRY_METRIC_COUNT] = {};
+  const uint8_t index = static_cast<uint8_t>(metric);
+  Serial.printf("%s RTDB updatedAt: %.0f ms.\n", telemetryMetricName(metric), serverSeen);
+  if (previousServerSeen[index] > 0 && serverSeen >= previousServerSeen[index]) {
+    Serial.printf("%s interval between RTDB updates: %.0f ms (target: %lu ms).\n",
+        telemetryMetricName(metric), serverSeen - previousServerSeen[index],
+        static_cast<unsigned long>(SENSOR_UPLOAD_INTERVAL_MS));
   }
-  previousServerSeen = serverSeen;
+  previousServerSeen[index] = serverSeen;
 }
 
-void uploadTelemetrySample(const TelemetrySample &sample) {
-  const float temperature = sample.temperature;
-  const float humidity = sample.humidity;
-  const float lightAdc = sample.lightAdc;
-  const float light = sample.lightPercent;
-  const bool validTemperature = isfinite(temperature) && temperature >= -40 && temperature <= 80;
-  const bool validHumidity = isfinite(humidity) && humidity >= 0 && humidity <= 100;
+void uploadTelemetryMetric(TelemetryMetric metric, const MetricReading &reading) {
+  const bool valid = validTelemetryReading(metric, reading.value);
+  const char *name = telemetryMetricName(metric);
+  const String field = String("telemetry/") + name;
   FirebaseJson update;
-  update.set("connectivity/isOnline", true);
-  update.set("connectivity/lastSeen/.sv", "timestamp");
-  // Remove unavailable DHT values so a new light heartbeat cannot make an old
-  // temperature/humidity sample appear fresh. Light still uploads independently.
-  if (validTemperature) update.set("telemetry/temperature", temperature);
-  else update.set("telemetry/temperature");  // SDK's null-value overload.
-  if (validHumidity) update.set("telemetry/humidity", humidity);
-  else update.set("telemetry/humidity");
-  update.set("telemetry/light", light);
-  if (!validTemperature || !validHumidity) {
-    Serial.println("DHT22 reading unavailable; uploading light and clearing invalid DHT values.");
+  FirebaseJson timestamp;
+  timestamp.add(".sv", "timestamp");
+  // add() preserves literal slash-separated keys for a multi-location PATCH.
+  // set() would create a nested telemetry object and replace its siblings.
+  update.add("connectivity/isOnline", true);
+  update.add("connectivity/lastSeen", timestamp);
+  if (valid) {
+    FirebaseJson record;
+    record.add("value", reading.value);
+    record.add("updatedAt", timestamp);
+    update.add(field.c_str(), record);
+  } else {
+    // Delete this whole record. Never attach a new timestamp to an old value.
+    update.add(field.c_str());
+    Serial.printf("%s reading unavailable; clearing only this metric.\n", name);
   }
   const String path = String("/deviceLive/") + DEVICE_ID;
   const uint32_t uploadStartedAt = millis();
-  Serial.print("Uploading complete telemetry sample captured at ");
-  Serial.print(sample.sampledAt);
-  Serial.print(" ms; sample age: ");
-  Serial.print(uploadStartedAt - sample.sampledAt);
-  Serial.println(" ms.");
-  // One atomic PATCH for all three readings and their shared server timestamp.
-  // Request the small JSON response when diagnostics are enabled, so it contains
-  // the server-resolved lastSeen from this exact write. Both modes wait for
-  // confirmation; neither adds a second database request.
+  Serial.printf("Uploading %s captured at %lu ms; sample age: %lu ms.\n", name,
+      static_cast<unsigned long>(reading.sampledAt),
+      static_cast<unsigned long>(uploadStartedAt - reading.sampledAt));
+  // Each request replaces just one metric record and its heartbeat. The value
+  // and updatedAt are committed atomically; sibling metric records stay intact.
+  // Both modes wait for server confirmation; diagnostics need no extra GET.
   const bool uploaded = FIREBASE_LOG_SERVER_TIMING
       ? Firebase.RTDB.updateNode(&firebaseData, path.c_str(), &update)
       : Firebase.RTDB.updateNodeSilent(&firebaseData, path.c_str(), &update);
   const uint32_t uploadFinishedAt = millis();
-  Serial.print("Firebase request duration: ");
-  Serial.print(uploadFinishedAt - uploadStartedAt);
-  Serial.println(" ms.");
+  Serial.printf("%s Firebase request duration: %lu ms.\n", name,
+      static_cast<unsigned long>(uploadFinishedAt - uploadStartedAt));
   if (uploaded) {
-    if (FIREBASE_LOG_SERVER_TIMING) logFirebaseServerTiming();
-    static bool hasPreviousUpload = false;
-    static uint32_t previousUploadFinishedAt = 0;
-    if (hasPreviousUpload) {
-      Serial.print("Interval between confirmed telemetry uploads: ");
-      Serial.print(uploadFinishedAt - previousUploadFinishedAt);
-      Serial.println(" ms (target: 5000 ms).");
-    }
-    previousUploadFinishedAt = uploadFinishedAt;
-    hasPreviousUpload = true;
-    Serial.print("Temperature: ");
-    if (validTemperature) Serial.print(temperature, 1);
-    else Serial.print("unavailable");
-    Serial.print(" C, ");
-    Serial.print("Humidity: ");
-    if (validHumidity) Serial.print(humidity, 1);
-    else Serial.print("unavailable");
-    Serial.print(" %, Light: ");
-    Serial.print(light, 1);
-    Serial.print(" % (ADC ");
-    Serial.print(lightAdc, 1);
-    Serial.println("); telemetry uploaded.");
+    if (valid && FIREBASE_LOG_SERVER_TIMING) logFirebaseServerTiming(metric);
+    if (valid) {
+      Serial.printf("%s: %.1f %s; metric uploaded.\n", name, reading.value,
+          metric == TelemetryMetric::Temperature ? "C" : "%");
+      if (metric == TelemetryMetric::Light) Serial.printf("Light ADC: %.1f.\n", reading.rawAdc);
+    } else Serial.printf("%s unavailable record cleared.\n", name);
   } else {
-    Serial.print("Firebase telemetry upload failed, code: ");
+    Serial.printf("Firebase %s upload failed, code: ", name);
     Serial.println(firebaseData.httpCode());
     Serial.print("Firebase telemetry upload error: ");
     Serial.println(safeFirebaseError(firebaseData.errorReason()));
-    Serial.println("The next upload will use the latest five-second sensor sample.");
+    Serial.println("Other metrics will still be attempted; this metric uses its next fresh reading.");
   }
 }
 
 void firebaseUploadTask(void *) {
+  // Only this task can feed its own subscription. A healthy sensor loop cannot
+  // conceal an uploader stuck in a network call.
+  const esp_err_t subscription = watchdogConfigured
+      ? subscribeCurrentTaskToWatchdog() : ESP_ERR_INVALID_STATE;
+  const bool watchdogSubscribed = subscription == ESP_OK;
+  if (watchdogSubscribed) Serial.println("Watchdog monitoring: firebase-upload task.");
+  else Serial.printf("Upload task watchdog unavailable, code: %d.\n", subscription);
   for (;;) {
+    // Idle/offline/authentication-wait iterations are healthy too. A reboot
+    // requires a stalled task, not merely missing Wi-Fi or a rejected login.
+    if (watchdogSubscribed) esp_task_wdt_reset();
     const EventBits_t bits = xEventGroupWaitBits(telemetryConnection,
         TELEMETRY_CONNECTED, pdFALSE, pdFALSE, pdMS_TO_TICKS(100));
     if ((bits & TELEMETRY_CONNECTED) == 0 || WiFi.status() != WL_CONNECTED) {
@@ -580,18 +608,42 @@ void firebaseUploadTask(void *) {
       vTaskDelay(pdMS_TO_TICKS(100));
       continue;
     }
-    TelemetrySample sample;
-    if (xQueueReceive(telemetryQueue, &sample, pdMS_TO_TICKS(100)) != pdTRUE) continue;
-    if ((xEventGroupGetBits(telemetryConnection) & TELEMETRY_CONNECTED) == 0 ||
-        WiFi.status() != WL_CONNECTED ||
-        millis() - sample.sampledAt > SENSOR_UPLOAD_INTERVAL_MS) continue;
-    uploadTelemetrySample(sample);
+    for (uint8_t index = 0; index < TELEMETRY_METRIC_COUNT; ++index) {
+      MetricReading reading;
+      if (xQueueReceive(telemetryQueues[index], &reading, 0) != pdTRUE) continue;
+      if ((xEventGroupGetBits(telemetryConnection) & TELEMETRY_CONNECTED) == 0 ||
+          WiFi.status() != WL_CONNECTED) break;
+      if (millis() - reading.sampledAt > SENSOR_UPLOAD_INTERVAL_MS) continue;
+      uploadTelemetryMetric(static_cast<TelemetryMetric>(index), reading);
+      // Feed only after a request returns; a blocked SDK call remains visible.
+      if (watchdogSubscribed) esp_task_wdt_reset();
+    }
+    vTaskDelay(pdMS_TO_TICKS(10));
   }
 }
 
 void setup() {
   Serial.begin(115200);
-  Serial.println("Yening telemetry firmware: atomic-5s-server-timing-v3.");
+  Serial.println("Yening telemetry firmware: independent-metrics-2s-watchdog-v5.");
+  const esp_reset_reason_t resetReason = esp_reset_reason();
+  if (resetReason == ESP_RST_TASK_WDT || resetReason == ESP_RST_INT_WDT ||
+      resetReason == ESP_RST_WDT) {
+    Serial.println("Previous restart was caused by a watchdog timeout.");
+  }
+  const esp_err_t watchdogResult = configureTaskWatchdog(TASK_WATCHDOG_TIMEOUT_SECONDS);
+  watchdogConfigured = watchdogResult == ESP_OK;
+  if (watchdogConfigured) {
+    const esp_err_t subscription = subscribeCurrentTaskToWatchdog();
+    loopWatchdogSubscribed = subscription == ESP_OK;
+    if (loopWatchdogSubscribed) {
+      Serial.printf("Watchdog monitoring: sensor/setup task; timeout: %lu seconds.\n",
+          static_cast<unsigned long>(TASK_WATCHDOG_TIMEOUT_SECONDS));
+    } else {
+      Serial.printf("Sensor task watchdog unavailable, code: %d.\n", subscription);
+    }
+  } else {
+    Serial.printf("Watchdog initialization failed, code: %d.\n", watchdogResult);
+  }
   pinMode(RESET_BUTTON_PIN, INPUT_PULLUP);
   pinMode(LDR_DATA_PIN, INPUT);
   analogReadResolution(12);
@@ -604,13 +656,19 @@ void setup() {
   const bool hasSavedWiFi = loadSavedWiFi();
   startSetupPortal();
   if (hasSavedWiFi) queueWiFiConnection(savedSSID, savedPassword, false);
-  telemetryQueue = xQueueCreate(1, sizeof(TelemetrySample));
+  bool queuesReady = true;
+  for (QueueHandle_t &queue : telemetryQueues) {
+    queue = xQueueCreate(1, sizeof(MetricReading));
+    queuesReady = queuesReady && queue != nullptr;
+  }
   telemetryConnection = xEventGroupCreate();
-  if (telemetryQueue == nullptr || telemetryConnection == nullptr ||
+  if (!queuesReady || telemetryConnection == nullptr ||
       xTaskCreate(firebaseUploadTask, "firebase-upload", 16384, nullptr, 1, nullptr) != pdPASS) {
-    if (telemetryQueue != nullptr) vQueueDelete(telemetryQueue);
+    for (QueueHandle_t &queue : telemetryQueues) {
+      if (queue != nullptr) vQueueDelete(queue);
+      queue = nullptr;
+    }
     if (telemetryConnection != nullptr) vEventGroupDelete(telemetryConnection);
-    telemetryQueue = nullptr;
     telemetryConnection = nullptr;
     Serial.println("Unable to start telemetry: insufficient task memory.");
   }
@@ -626,5 +684,6 @@ void loop() {
   processQueuedConnection();
   processProvisioning();
   processSensorSampling();
+  if (loopWatchdogSubscribed) esp_task_wdt_reset();
   delay(2);
 }

@@ -14,8 +14,9 @@ class TemperatureUnitSelector extends StatelessWidget {
       valueListenable: units,
       builder: (context, unit, _) => SegmentedButton<TemperatureUnit>(
         style: ButtonStyle(
-          visualDensity: VisualDensity.compact,
-          minimumSize: const WidgetStatePropertyAll(Size(32, 32)),
+          visualDensity: VisualDensity.standard,
+          minimumSize: const WidgetStatePropertyAll(Size(40, 40)),
+          tapTargetSize: MaterialTapTargetSize.padded,
           padding: const WidgetStatePropertyAll(
             EdgeInsets.symmetric(horizontal: 9),
           ),

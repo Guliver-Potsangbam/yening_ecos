@@ -25,16 +25,43 @@
         "telemetry": {
           ".validate": "newData.hasChildren()",
           "temperature": {
-            ".validate": "newData.isNumber() && newData.val() >= -40 && newData.val() <= 80"
+            ".validate": "(newData.isNumber() && newData.val() >= -40 && newData.val() <= 80) || (newData.hasChildren(['value', 'updatedAt']) && (newData.child('value').val() === data.child('value').val() || !data.child('updatedAt').exists() || newData.child('updatedAt').val() > data.child('updatedAt').val()))",
+            "value": {
+              ".validate": "newData.isNumber() && newData.val() >= -40 && newData.val() <= 80"
+            },
+            "updatedAt": {
+              ".validate": "newData.isNumber() && newData.val() % 1 === 0 && newData.val() > 0 && (newData.val() === data.val() || (newData.val() >= now - 60000 && newData.val() <= now + 5000 && (!data.exists() || newData.val() >= data.val())))"
+            },
+            "$other": {
+              ".validate": false
+            }
           },
           "humidity": {
-            ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 100"
+            ".validate": "(newData.isNumber() && newData.val() >= 0 && newData.val() <= 100) || (newData.hasChildren(['value', 'updatedAt']) && (newData.child('value').val() === data.child('value').val() || !data.child('updatedAt').exists() || newData.child('updatedAt').val() > data.child('updatedAt').val()))",
+            "value": {
+              ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 100"
+            },
+            "updatedAt": {
+              ".validate": "newData.isNumber() && newData.val() % 1 === 0 && newData.val() > 0 && (newData.val() === data.val() || (newData.val() >= now - 60000 && newData.val() <= now + 5000 && (!data.exists() || newData.val() >= data.val())))"
+            },
+            "$other": {
+              ".validate": false
+            }
           },
           "$other": {
             ".validate": false
           },
           "light": {
-            ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 100"
+            ".validate": "(newData.isNumber() && newData.val() >= 0 && newData.val() <= 100) || (newData.hasChildren(['value', 'updatedAt']) && (newData.child('value').val() === data.child('value').val() || !data.child('updatedAt').exists() || newData.child('updatedAt').val() > data.child('updatedAt').val()))",
+            "value": {
+              ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 100"
+            },
+            "updatedAt": {
+              ".validate": "newData.isNumber() && newData.val() % 1 === 0 && newData.val() > 0 && (newData.val() === data.val() || (newData.val() >= now - 60000 && newData.val() <= now + 5000 && (!data.exists() || newData.val() >= data.val())))"
+            },
+            "$other": {
+              ".validate": false
+            }
           }
         },
         "$other": {

@@ -25,11 +25,16 @@ constexpr uint32_t RESET_HOLD_MS = 5000;
 constexpr uint32_t WIFI_JOIN_TIMEOUT_MS = 20000;
 constexpr uint32_t PORTAL_GRACE_MS = 30000;
 constexpr uint32_t SAVED_WIFI_PORTAL_GRACE_MS = 120000;
-constexpr uint32_t SENSOR_UPLOAD_INTERVAL_MS = 5000;
+constexpr uint32_t DHT_MINIMUM_READ_INTERVAL_MS = 2000;
+constexpr uint32_t SENSOR_UPLOAD_INTERVAL_MS = 2000;
+static_assert(SENSOR_UPLOAD_INTERVAL_MS >= DHT_MINIMUM_READ_INTERVAL_MS,
+    "DHT22 requires at least two seconds between fresh reads");
+// Recovery timeout for a stalled task, separate from the telemetry interval.
+constexpr uint32_t TASK_WATCHDOG_TIMEOUT_SECONDS = 30;
 constexpr uint32_t FIREBASE_RESPONSE_TIMEOUT_MS = 2000;
 constexpr uint32_t FIREBASE_HANDSHAKE_TIMEOUT_SECONDS = 3;
-// Include the server-resolved heartbeat in the write response for diagnostics.
-// No extra database read or write is needed to measure actual RTDB intervals.
+// Include the metric's resolved updatedAt in its write response for diagnostics.
+// No extra read/write is needed to measure each metric's actual RTDB interval.
 constexpr bool FIREBASE_LOG_SERVER_TIMING = true;
 
 enum class ProvisioningState {

@@ -12,15 +12,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   @override
   void initState() {
-    print("INIT STATE CALLED");
     data = 0;
     super.initState();
   }
 
   @override
   void dispose() {
-    // TODO: implement dispose
-    print("HI I AM DISPOSED");
     super.dispose();
   }
 
@@ -30,7 +27,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
       floatingActionButton: FloatingActionButton(
         onPressed: () {
           data++;
-          print(data);
           setState(() {});
         },
         child: Icon(Icons.camera),

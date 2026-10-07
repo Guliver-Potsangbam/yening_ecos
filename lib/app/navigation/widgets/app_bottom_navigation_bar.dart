@@ -20,12 +20,14 @@ class AppBottomNavigationBar extends StatelessWidget {
         padding: const EdgeInsets.fromLTRB(16, 8, 16, 10),
         child: DecoratedBox(
           decoration: BoxDecoration(
-            color: colorScheme.surfaceContainerLow,
+            color: colorScheme.surfaceContainerLowest,
             borderRadius: BorderRadius.circular(24),
-            border: Border.all(color: colorScheme.outlineVariant),
+            border: Border.all(
+              color: colorScheme.outlineVariant.withValues(alpha: 0.5),
+            ),
             boxShadow: [
               BoxShadow(
-                color: colorScheme.shadow.withValues(alpha: 0.08),
+                color: colorScheme.shadow.withValues(alpha: 0.04),
                 blurRadius: 18,
                 offset: const Offset(0, 6),
               ),

@@ -25,9 +25,9 @@ class AppTopBar extends StatelessWidget implements PreferredSizeWidget {
     return AppBar(
       toolbarHeight: 76,
       backgroundColor: colorScheme.surface,
-      surfaceTintColor: colorScheme.surfaceTint,
-      elevation: 1.5,
-      scrolledUnderElevation: 2,
+      surfaceTintColor: Colors.transparent,
+      elevation: 0,
+      scrolledUnderElevation: 0,
       shadowColor: colorScheme.shadow.withValues(alpha: 0.14),
       automaticallyImplyLeading: false,
       titleSpacing: 0,
@@ -43,7 +43,7 @@ class AppTopBar extends StatelessWidget implements PreferredSizeWidget {
             width: 42,
             height: 42,
             decoration: BoxDecoration(
-              color: colorScheme.surfaceContainerHighest,
+              color: colorScheme.primary.withValues(alpha: 0.08),
               borderRadius: BorderRadius.circular(12),
             ),
             padding: const EdgeInsets.all(5),

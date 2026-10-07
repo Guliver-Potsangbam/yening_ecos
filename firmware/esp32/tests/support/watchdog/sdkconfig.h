@@ -1,0 +1,3 @@
+#pragma once
+
+#define CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU0 1

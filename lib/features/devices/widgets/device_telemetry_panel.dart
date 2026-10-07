@@ -4,6 +4,7 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 
 import '../../../core/preferences/temperature_unit_preference.dart';
+import '../../../core/ui/local_time_format.dart';
 import '../models/device_telemetry.dart';
 import '../services/device_telemetry_service.dart';
 import 'telemetry_gauge.dart';
@@ -34,7 +35,7 @@ class _DeviceTelemetryPanelState extends State<DeviceTelemetryPanel> {
   void initState() {
     super.initState();
     _watch();
-    _freshnessTimer = Timer.periodic(const Duration(seconds: 5), (_) {
+    _freshnessTimer = Timer.periodic(const Duration(seconds: 2), (_) {
       if (mounted) setState(() {});
     });
   }
@@ -65,20 +66,16 @@ class _DeviceTelemetryPanelState extends State<DeviceTelemetryPanel> {
     super.dispose();
   }
 
-  String _updatedAt(DateTime? seen) {
-    if (seen == null) return 'Waiting for a device update';
-    final age = DateTime.now().difference(seen);
-    if (age.inSeconds < 1) return 'Updated just now';
-    if (age.inSeconds < 60) return 'Updated ${age.inSeconds}s ago';
-    if (age.inMinutes < 60) return 'Updated ${age.inMinutes}m ago';
-    if (age.inHours < 24) return 'Updated ${age.inHours}h ago';
-    return 'Updated ${age.inDays}d ago';
-  }
-
-  String _updateTime(DateTime seen) {
-    final local = seen.toLocal();
-    String twoDigits(int value) => value.toString().padLeft(2, '0');
-    return 'Last update: ${twoDigits(local.hour)}:${twoDigits(local.minute)}:${twoDigits(local.second)}';
+  String _sensorStatus(
+    DeviceTelemetry reading,
+    double? value,
+    DateTime? updatedAt,
+    bool fresh,
+  ) {
+    if (value == null || !value.isFinite || updatedAt == null) return 'Waiting';
+    if (reading.isCloudConnected == false) return 'Reconnecting';
+    if (reading.isOnline == false) return 'Offline';
+    return fresh ? 'Live' : 'Stale';
   }
 
   @override
@@ -121,7 +118,7 @@ class _DeviceTelemetryPanelState extends State<DeviceTelemetryPanel> {
             : reading.isOnline == false
             ? 'Offline'
             : fresh
-            ? 'Live'
+            ? 'Device online'
             : 'No recent updates';
         return ValueListenableBuilder<TemperatureUnit>(
           valueListenable: _units,
@@ -134,7 +131,7 @@ class _DeviceTelemetryPanelState extends State<DeviceTelemetryPanel> {
                 crossAxisAlignment: WrapCrossAlignment.center,
                 children: [
                   Text(
-                    'Measurements',
+                    'Sensor readings',
                     style: theme.textTheme.titleSmall?.copyWith(
                       fontWeight: FontWeight.w700,
                     ),
@@ -172,20 +169,49 @@ class _DeviceTelemetryPanelState extends State<DeviceTelemetryPanel> {
                       ],
                     ),
                   ),
+                  if (reading.lastSeen != null &&
+                      reading.lastSeen!.millisecondsSinceEpoch > 0)
+                    Tooltip(
+                      message:
+                          'Device connection heartbeat · ${formatLocalDateTime12(reading.lastSeen!)}',
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            Icons.schedule_rounded,
+                            size: 13,
+                            color: theme.colorScheme.onSurfaceVariant,
+                          ),
+                          const SizedBox(width: 5),
+                          Flexible(
+                            child: Text(
+                              'Device seen: ${formatLocalTime12(reading.lastSeen!)}',
+                              key: const ValueKey('telemetry-updated-time'),
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                color: theme.colorScheme.onSurfaceVariant,
+                                fontSize: 11,
+                                fontFeatures: const [
+                                  FontFeature.tabularFigures(),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
                 ],
               ),
               const SizedBox(height: 12),
               LayoutBuilder(
                 builder: (context, constraints) {
                   final textScale = MediaQuery.textScalerOf(context).scale(1);
-                  final minimumWidth = 136 * textScale;
+                  // Equal compact rows on phones; equal columns when all
+                  // three meters fit comfortably, including large text.
                   final columns =
-                      constraints.maxWidth >= 600 &&
-                          constraints.maxWidth >= minimumWidth * 3 + 24
-                      ? 3
-                      : constraints.maxWidth >= minimumWidth * 2 + 12
-                      ? 2
-                      : 1;
+                      constraints.maxWidth >= 240 * textScale * 3 + 24 ? 3 : 1;
+                  final horizontal =
+                      columns == 1 && constraints.maxWidth >= 320 * textScale;
+                  final now = DateTime.now();
                   final temperature = TelemetryGauge(
                     key: const ValueKey('temperature-meter'),
                     label: 'Temperature',
@@ -200,13 +226,29 @@ class _DeviceTelemetryPanelState extends State<DeviceTelemetryPanel> {
                     color: const Color(0xFF218A72),
                     icon: Icons.thermostat_rounded,
                     trailing: TemperatureUnitSelector(preference: _units),
-                    horizontal:
-                        columns < 3 && constraints.maxWidth >= 300 * textScale,
+                    horizontal: horizontal,
+                    updatedAt: reading.temperatureUpdatedAt,
+                    updatedAtKey: const ValueKey('temperature-updated-time'),
+                    freshnessLabel: _sensorStatus(
+                      reading,
+                      reading.temperatureCelsius,
+                      reading.temperatureUpdatedAt,
+                      reading.isTemperatureFreshAt(now),
+                    ),
                   );
                   final humidity = TelemetryGauge(
                     key: const ValueKey('humidity-meter'),
                     label: 'Humidity',
                     value: reading.humidity,
+                    horizontal: horizontal,
+                    updatedAt: reading.humidityUpdatedAt,
+                    updatedAtKey: const ValueKey('humidity-updated-time'),
+                    freshnessLabel: _sensorStatus(
+                      reading,
+                      reading.humidity,
+                      reading.humidityUpdatedAt,
+                      reading.isHumidityFreshAt(now),
+                    ),
                     unit: '%',
                     minimum: 0,
                     maximum: 100,
@@ -220,6 +262,15 @@ class _DeviceTelemetryPanelState extends State<DeviceTelemetryPanel> {
                     label: 'Light',
                     statusLabel: reading.lightLabel,
                     value: reading.lightPercent,
+                    horizontal: horizontal,
+                    updatedAt: reading.lightUpdatedAt,
+                    updatedAtKey: const ValueKey('light-updated-time'),
+                    freshnessLabel: _sensorStatus(
+                      reading,
+                      reading.lightPercent,
+                      reading.lightUpdatedAt,
+                      reading.isLightFreshAt(now),
+                    ),
                     unit: '%',
                     minimum: 0,
                     maximum: 100,
@@ -235,37 +286,12 @@ class _DeviceTelemetryPanelState extends State<DeviceTelemetryPanel> {
                     spacing: 12,
                     runSpacing: 12,
                     children: [
-                      SizedBox(
-                        width: columns == 2 ? constraints.maxWidth : gaugeWidth,
-                        child: temperature,
-                      ),
+                      SizedBox(width: gaugeWidth, child: temperature),
                       SizedBox(width: gaugeWidth, child: humidity),
                       SizedBox(width: gaugeWidth, child: light),
                     ],
                   );
                 },
-              ),
-              const SizedBox(height: 10),
-              Wrap(
-                spacing: 12,
-                runSpacing: 4,
-                children: [
-                  Text(
-                    _updatedAt(reading.lastSeen),
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: theme.colorScheme.onSurfaceVariant,
-                    ),
-                  ),
-                  if (reading.lastSeen != null &&
-                      reading.lastSeen!.millisecondsSinceEpoch > 0)
-                    Text(
-                      _updateTime(reading.lastSeen!),
-                      key: const ValueKey('telemetry-updated-time'),
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: theme.colorScheme.onSurfaceVariant,
-                      ),
-                    ),
-                ],
               ),
               if (!reading.hasReadings) ...[
                 const SizedBox(height: 16),
