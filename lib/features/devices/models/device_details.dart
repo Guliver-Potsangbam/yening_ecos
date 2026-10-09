@@ -76,7 +76,7 @@ class DeviceDetails {
         'Recommended version',
         _text(compatibility['recommendedVersion']),
       ),
-    ], expanded: true);
+    ], expanded: false);
 
     section('hardware', 'Hardware & connectivity', [
       DeviceMetadataField('Controller', _text(hardware['controller'])),

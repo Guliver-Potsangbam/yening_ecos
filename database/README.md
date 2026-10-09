@@ -13,7 +13,7 @@ Firestore holds the `devices`, `deviceTypes`, and `users` collections. Device na
 | `telemetry/light/value` | Numeric relative light percent, 0 to 100 |
 | `telemetry/<metric>/updatedAt` | That metric's Firebase server timestamp, Unix milliseconds |
 | `connectivity/lastSeen` | Firebase server timestamp in Unix milliseconds |
-| `connectivity/isOnline` | Boolean reported by the device |
+| `connectivity/isOnline` | Last device-reported online flag; verify `lastSeen` before displaying online |
 
 `light` matches the supplied Firestore device-type definition. The firmware samples the LDR on confirmed GPIO34, averages 16 readings, and normalizes them to a bounded relative percentage using the dark/bright reference values in `device_config.h`. The current endpoints map ADC 4095 to 0% and ADC 0 to 100%; measured calibration remains to be confirmed. The contract accepts decimal percentages; it does not label raw ADC counts as percent or lux. Flutter displays a third live light gauge on Home and Device Details. A DHT22 failure does not stop light uploads; unavailable DHT fields are cleared rather than shown as fresh values.
 
@@ -27,7 +27,19 @@ The app can use the shared heartbeat as the timestamp of an entirely legacy nume
 
 Publish the updated [`database.rules.json`](database.rules.json) before the new firmware uploads record objects. The old numeric-only cloud rules reject the new format. This repository update and emulator validation have not published cloud rules. Existing live records migrate automatically as each metric first uploads; reimporting `rtdb.import.json` would overwrite existing data and is unnecessary.
 
-The import shows each metric as `{ "value": null, "updatedAt": null }`, matching the independent record format without inventing measurements or update times. RTDB removes null values and empty objects, so these placeholder records and the telemetry branch appear in Firebase only when the device uploads real value/timestamp pairs. Zero remains a valid measurement. `isOnline: false` and `lastSeen: 0` indicate that no heartbeat has been recorded in this seed. Claimed/provisioned status remains in Firestore; it does not prove that a fresh cloud heartbeat exists. The app already checks heartbeat freshness against a 60-second threshold and converts Celsius to Fahrenheit for display.
+The import shows each metric as `{ "value": null, "updatedAt": null }`, matching the independent record format without inventing measurements or update times. RTDB removes null values and empty objects, so these placeholder records and the telemetry branch appear in Firebase only when the device uploads real value/timestamp pairs. Zero remains a valid measurement. `isOnline: false` and `lastSeen: 0` indicate that no heartbeat has been recorded in this seed. Claimed/provisioned status remains in Firestore; it does not prove that a fresh cloud heartbeat exists. The app infers device connectivity from a positive heartbeat within ten seconds and converts Celsius to Fahrenheit for display.
+
+## Device online/offline status
+
+`isOnline` is the last flag uploaded by the device. Abrupt loss of power or Wi-Fi stops uploads; the current ESP32 HTTP/PATCH firmware has no registered server-side disconnect operation, so the stored flag can remain `true`. Database rules do not run scheduled writes when a heartbeat expires.
+
+Flutter checks `lastSeen` using a ten-second timeout (five two-second upload intervals). Its existing two-second UI timer rechecks the retained snapshot even when RTDB emits no events, so the header shows **Device offline** approximately ten to twelve seconds after the last successful heartbeat. The sensor cards retain their last values and times but show **Offline**. A fresh heartbeat restores the online state. Individual sensor-age checks retain their separate 60-second freshness window while the device is reachable.
+
+An explicit `isOnline: false` also marks the device offline. A disconnected phone displays **Reconnecting to live readings**, because its inability to reach Firebase does not establish that the ESP32 is offline. `/.info/connected` describes the observing client's connection.
+
+This client-side inference changes the app display; it does not mutate the stored RTDB flag. Automatically clearing that flag requires presence tracking registered by the device's own persistent connection, or a trusted heartbeat monitor. Registering a disconnect handler from the phone would track the phone instead of the device. The current development setup uses heartbeat inference without adding a paid service.
+
+Reference: [Firebase connection state and presence](https://firebase.google.com/docs/database/flutter/offline-capabilities#managing_presence).
 
 ## Access
 

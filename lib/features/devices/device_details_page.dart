@@ -2,12 +2,12 @@ import 'package:flutter/material.dart';
 
 import '../../core/preferences/temperature_unit_preference.dart';
 import '../../core/ui/monitoring_background.dart';
+import '../device_setup/device_setup_page.dart';
 import 'models/user_device.dart';
 import 'services/device_details_service.dart';
 import 'services/device_telemetry_service.dart';
 import 'widgets/device_metadata_panel.dart';
 import 'widgets/device_telemetry_panel.dart';
-import 'widgets/user_device_card.dart';
 
 class DeviceDetailsPage extends StatefulWidget {
   const DeviceDetailsPage({
@@ -58,7 +58,21 @@ class _DeviceDetailsPageState extends State<DeviceDetailsPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Theme.of(context).colorScheme.surfaceContainerLow,
-      appBar: AppBar(title: const Text('Device details')),
+      appBar: AppBar(
+        title: const Text('Device details'),
+        actions: [
+          IconButton(
+            tooltip: 'Change Wi-Fi',
+            icon: const Icon(Icons.wifi_rounded),
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute<bool>(
+                builder: (_) =>
+                    DeviceSetupPage(deviceToReconnect: widget.device),
+              ),
+            ),
+          ),
+        ],
+      ),
       body: MonitoringBackground(
         child: SafeArea(
           child: Align(
@@ -79,16 +93,14 @@ class _DeviceDetailsPageState extends State<DeviceDetailsPage> {
                   return ListView(
                     padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
                     children: [
-                      UserDeviceCard(
-                        device: metadata.details?.device ?? widget.device,
-                        telemetry: DeviceTelemetryPanel(
-                          key: ValueKey(
-                            'details-telemetry-${widget.device.deviceId}',
-                          ),
-                          deviceId: widget.device.deviceId,
-                          telemetrySource: widget.telemetrySource,
-                          unitPreference: widget.unitPreference,
+                      DeviceTelemetryPanel(
+                        key: ValueKey(
+                          'details-telemetry-${widget.device.deviceId}',
                         ),
+                        device: metadata.details?.device ?? widget.device,
+                        deviceId: widget.device.deviceId,
+                        telemetrySource: widget.telemetrySource,
+                        unitPreference: widget.unitPreference,
                       ),
                       const SizedBox(height: 18),
                       DeviceMetadataPanel(

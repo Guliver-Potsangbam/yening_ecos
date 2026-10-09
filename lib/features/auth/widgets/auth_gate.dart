@@ -9,20 +9,33 @@ class AuthGate extends StatefulWidget {
     super.key,
     required this.authenticatedBuilder,
     required this.unauthenticatedBuilder,
+    this.authService,
+    this.notificationRegistrationService,
   });
 
   final WidgetBuilder authenticatedBuilder;
   final WidgetBuilder unauthenticatedBuilder;
+  final AuthService? authService;
+  final NotificationRegistrationService? notificationRegistrationService;
 
   @override
   State<AuthGate> createState() => _AuthGateState();
 }
 
 class _AuthGateState extends State<AuthGate> {
-  final AuthService _authService = AuthService();
+  late final Stream<User?> _authStateChanges;
+  late final NotificationRegistrationService _notificationRegistrationService;
 
-  final NotificationRegistrationService _notificationRegistrationService =
-      NotificationRegistrationService.instance;
+  @override
+  void initState() {
+    super.initState();
+    // A new auth stream on a rebuild briefly removes the navigation shell,
+    // losing the current tab and its subscriptions during back navigation.
+    _authStateChanges = (widget.authService ?? AuthService()).authStateChanges;
+    _notificationRegistrationService =
+        widget.notificationRegistrationService ??
+        NotificationRegistrationService.instance;
+  }
 
   User? _lastRegisteredUser;
 
@@ -45,7 +58,7 @@ class _AuthGateState extends State<AuthGate> {
   @override
   Widget build(BuildContext context) {
     return StreamBuilder<User?>(
-      stream: _authService.authStateChanges,
+      stream: _authStateChanges,
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Scaffold(
@@ -69,7 +82,10 @@ class _AuthGateState extends State<AuthGate> {
           _registerNotifications(user);
         });
 
-        return widget.authenticatedBuilder(context);
+        return KeyedSubtree(
+          key: ValueKey(user.uid),
+          child: widget.authenticatedBuilder(context),
+        );
       },
     );
   }

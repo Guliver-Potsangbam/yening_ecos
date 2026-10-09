@@ -9,19 +9,51 @@ import 'edit_profile_page.dart';
 import 'widgets/profile_header.dart';
 import 'widgets/profile_info_tile.dart';
 
-class ProfilePage extends StatelessWidget {
-  ProfilePage({
+class ProfilePage extends StatefulWidget {
+  const ProfilePage({
     super.key,
-    ProfileService? profileService,
-    FirebaseAuth? auth,
-    AuthService? authService,
-  }) : _profileService = profileService ?? ProfileService(),
-       _auth = auth ?? FirebaseAuth.instance,
-       _authService = authService ?? AuthService();
+    this.profileService,
+    this.auth,
+    this.authService,
+  });
 
-  final ProfileService _profileService;
-  final FirebaseAuth _auth;
-  final AuthService _authService;
+  final ProfileService? profileService;
+  final FirebaseAuth? auth;
+  final AuthService? authService;
+
+  @override
+  State<ProfilePage> createState() => _ProfilePageState();
+}
+
+class _ProfilePageState extends State<ProfilePage> {
+  late ProfileService _profileService;
+  late FirebaseAuth _auth;
+  late AuthService _authService;
+  late Stream<DocumentSnapshot<Map<String, dynamic>>> _profileStream;
+
+  @override
+  void initState() {
+    super.initState();
+    _bindServices();
+  }
+
+  void _bindServices() {
+    _profileService = widget.profileService ?? ProfileService();
+    _auth = widget.auth ?? FirebaseAuth.instance;
+    _authService = widget.authService ?? AuthService();
+    _profileStream = _profileService.watchCurrentUserProfile();
+  }
+
+  @override
+  void didUpdateWidget(ProfilePage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.profileService != widget.profileService ||
+        oldWidget.auth != widget.auth) {
+      _bindServices();
+    } else if (oldWidget.authService != widget.authService) {
+      _authService = widget.authService ?? AuthService();
+    }
+  }
 
   void _openEditProfile(BuildContext context) {
     Navigator.of(context).push(
@@ -100,7 +132,7 @@ class ProfilePage extends StatelessWidget {
         ],
       ),
       body: StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
-        stream: _profileService.watchCurrentUserProfile(),
+        stream: _profileStream,
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
             return const Center(child: CircularProgressIndicator());

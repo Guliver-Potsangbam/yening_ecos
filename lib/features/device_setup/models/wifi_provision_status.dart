@@ -15,6 +15,15 @@ class WifiProvisionStatus {
     return status == 'connected';
   }
 
+  bool get hasConfirmedConnection =>
+      isConnected &&
+      deviceId.isNotEmpty &&
+      ssid != null &&
+      ssid!.isNotEmpty &&
+      ipAddress != null &&
+      ipAddress!.isNotEmpty &&
+      ipAddress != '0.0.0.0';
+
   bool get isFailed {
     return status == 'failed';
   }
@@ -25,6 +34,9 @@ class WifiProvisionStatus {
       throw const FormatException('Invalid connected flag.');
     }
     final status = json['status'] as String?;
+    if (status == 'connected' && connected == false) {
+      throw const FormatException('Contradictory connection status.');
+    }
     if (status == null && connected == null) {
       throw const FormatException('Missing Wi-Fi status.');
     }

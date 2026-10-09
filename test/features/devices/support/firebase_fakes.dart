@@ -86,6 +86,14 @@ class TestDocument implements DocumentReference<Map<String, dynamic>> {
   @override
   final String path;
   @override
+  Future<DocumentSnapshot<Map<String, dynamic>>> get([
+    GetOptions? options,
+  ]) async {
+    store.reads.add(path);
+    return TestDocumentSnapshot(store.records[path]);
+  }
+
+  @override
   CollectionReference<Map<String, dynamic>> collection(String name) =>
       TestCollection(store, '$path/$name');
   @override

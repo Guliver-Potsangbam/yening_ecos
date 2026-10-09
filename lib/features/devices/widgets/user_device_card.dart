@@ -8,12 +8,14 @@ class UserDeviceCard extends StatelessWidget {
     required this.device,
     this.onTap,
     this.telemetry,
+    this.connectionDetails,
     this.showSerialNumber = true,
   });
 
   final UserDevice device;
   final VoidCallback? onTap;
   final Widget? telemetry;
+  final Widget? connectionDetails;
   final bool showSerialNumber;
 
   @override
@@ -79,6 +81,10 @@ class UserDeviceCard extends StatelessWidget {
                             'Serial: ${device.serialNumber}',
                             style: theme.textTheme.bodySmall,
                           ),
+                        ],
+                        if (connectionDetails != null) ...[
+                          const SizedBox(height: 8),
+                          connectionDetails!,
                         ],
                       ],
                     ),

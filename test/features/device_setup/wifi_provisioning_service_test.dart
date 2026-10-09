@@ -161,28 +161,28 @@ void main() {
     );
   });
 
-  test('accepts a confirmed connection from the legacy status API', () async {
-    messenger.setMockMethodCallHandler(
-      channel,
-      (_) async => '{"connected":true,"ssid":"Home","ip":"192.168.1.20","apIp":"192.168.4.1"}',
-    );
-    final status = await wait();
-    expect(status.isConnected, isTrue);
-    expect(status.ipAddress, '192.168.1.20');
-  });
-
   test(
-    'retries transport interruption while the ESP32 changes radio channel',
+    'accepts a confirmed connection with identity and legacy boolean status',
     () async {
-      var count = 0;
-      messenger.setMockMethodCallHandler(channel, (_) async {
-        if (++count == 1) throw PlatformException(code: 'DEVICE_HTTP_ERROR');
-        return '{"connected":true,"ssid":"Home","ip":"192.168.1.20"}';
-      });
-      expect((await wait()).isConnected, isTrue);
-      expect(count, 2);
+      messenger.setMockMethodCallHandler(
+        channel,
+        (_) async => '{"deviceId":"YEC-DEV-000001","connected":true,"ssid":"Home","ip":"192.168.1.20","apIp":"192.168.4.1"}',
+      );
+      final status = await wait();
+      expect(status.isConnected, isTrue);
+      expect(status.ipAddress, '192.168.1.20');
     },
   );
+
+  test('retries transport interruption while the ESP32 changes radio channel', () async {
+    var count = 0;
+    messenger.setMockMethodCallHandler(channel, (_) async {
+      if (++count == 1) throw PlatformException(code: 'DEVICE_HTTP_ERROR');
+      return '{"deviceId":"YEC-DEV-000001","connected":true,"ssid":"Home","ip":"192.168.1.20"}';
+    });
+    expect((await wait()).isConnected, isTrue);
+    expect(count, 2);
+  });
 
   test('fails immediately for an explicit firmware failure', () async {
     messenger.setMockMethodCallHandler(
@@ -260,11 +260,25 @@ void main() {
     var cancelled = false;
     messenger.setMockMethodCallHandler(channel, (_) async {
       cancelled = true;
-      return '{"connected":true,"ssid":"Home","ip":"192.168.1.20"}';
+      return '{"deviceId":"YEC-DEV-000001","connected":true,"ssid":"Home","ip":"192.168.1.20"}';
     });
     await expectLater(
       wait(isCancelled: () => cancelled),
       throwsA(errorCode('WIFI_SETUP_CANCELLED')),
     );
+  });
+  test('cannot confirm a connection that omits device identity', () async {
+    messenger.setMockMethodCallHandler(
+      channel,
+      (_) async => '{"connected":true,"ssid":"Home","ip":"192.168.1.20"}',
+    );
+    await expectLater(wait(), throwsA(errorCode('WIFI_CONFIRMATION_TIMEOUT')));
+  });
+  test('cannot confirm contradictory connected flags', () async {
+    messenger.setMockMethodCallHandler(
+      channel,
+      (_) async => '{"status":"connected","connected":false,"deviceId":"YEC-DEV-000001","ssid":"Home","ip":"192.168.1.20"}',
+    );
+    await expectLater(wait(), throwsA(isA<WifiProvisioningException>()));
   });
 }

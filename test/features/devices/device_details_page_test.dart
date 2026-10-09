@@ -123,6 +123,8 @@ void main() {
   testWidgets(
     'switching the device clears previous metadata before the next document arrives',
     (tester) async {
+      await tester.binding.setSurfaceSize(const Size(800, 1400));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
       final first = StreamController<DeviceDetailsState>.broadcast();
       final second = StreamController<DeviceDetailsState>.broadcast();
       addTearDown(first.close);
@@ -202,7 +204,11 @@ void main() {
         250,
         scrollable: find.byType(Scrollable).first,
       );
+      await tester.ensureVisible(find.text('Retry device information'));
+      await tester.pumpAndSettle();
       await tester.tap(find.text('Retry device information'));
+      expect(metadataWatches, 2);
+      await tester.pump();
       await tester.pump();
       final panel = tester.widget<DeviceMetadataPanel>(
         find.byType(DeviceMetadataPanel),
@@ -244,6 +250,9 @@ void main() {
       );
       expect(find.text('Claimed'), findsOneWidget);
       expect(find.text('Provisioned'), findsOneWidget);
+      await tester.ensureVisible(find.text('Firmware'));
+      await tester.tap(find.text('Firmware'));
+      await tester.pumpAndSettle();
       expect(
         find.text(formatLocalDateTime12(DateTime.utc(2026, 10, 7, 8, 30))),
         findsOneWidget,

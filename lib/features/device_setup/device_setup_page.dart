@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 
 import '../devices/data/device_claim_service.dart';
 import '../devices/data/device_registry_service.dart';
+import '../devices/models/user_device.dart';
 import 'models/device_setup_config.dart';
 import 'models/device_type_definition.dart';
 import 'models/local_device_info.dart';
@@ -16,6 +17,7 @@ import 'services/wifi_provisioning_service.dart';
 import 'widgets/wifi_network_picker.dart';
 
 enum DeviceSetupStage {
+  preparingDevice,
   connectingToDevice,
   verifyingDevice,
   enteringWifi,
@@ -29,22 +31,35 @@ class DeviceSetupPage extends StatefulWidget {
   const DeviceSetupPage({
     super.key,
     this.config = DeviceSetupConfig.development,
+    this.deviceToReconnect,
+    this.wifiService,
+    this.deviceTypeService,
+    this.deviceRegistryService,
+    this.deviceClaimService,
+    this.currentUserUid,
   });
 
   final DeviceSetupConfig config;
+  final UserDevice? deviceToReconnect;
+  final WifiProvisioningService? wifiService;
+  final DeviceTypeService? deviceTypeService;
+  final DeviceRegistryService? deviceRegistryService;
+  final DeviceClaimService? deviceClaimService;
+  final String? Function()? currentUserUid;
 
   @override
   State<DeviceSetupPage> createState() => _DeviceSetupPageState();
 }
 
 class _DeviceSetupPageState extends State<DeviceSetupPage> {
-  final WifiProvisioningService _wifiService = WifiProvisioningService.instance;
-
-  final DeviceTypeService _deviceTypeService = DeviceTypeService();
-
-  final DeviceRegistryService _deviceRegistryService = DeviceRegistryService();
-
-  final DeviceClaimService _deviceClaimService = DeviceClaimService();
+  late final WifiProvisioningService _wifiService;
+  late final DeviceTypeService _deviceTypeService;
+  late final DeviceRegistryService _deviceRegistryService;
+  late final DeviceClaimService _deviceClaimService;
+  bool get _reconnecting => widget.deviceToReconnect != null;
+  String? get _currentUid => widget.currentUserUid != null
+      ? widget.currentUserUid!()
+      : FirebaseAuth.instance.currentUser?.uid;
 
   final GlobalKey<FormState> _formKey = GlobalKey<FormState>();
 
@@ -90,7 +105,16 @@ class _DeviceSetupPageState extends State<DeviceSetupPage> {
   void initState() {
     super.initState();
 
-    Future.microtask(_beginSetup);
+    _wifiService = widget.wifiService ?? WifiProvisioningService.instance;
+    _deviceTypeService = widget.deviceTypeService ?? DeviceTypeService();
+    _deviceRegistryService =
+        widget.deviceRegistryService ?? DeviceRegistryService();
+    _deviceClaimService = widget.deviceClaimService ?? DeviceClaimService();
+    if (_reconnecting) {
+      _stage = DeviceSetupStage.preparingDevice;
+    } else {
+      Future.microtask(_beginSetup);
+    }
   }
 
   @override
@@ -129,6 +153,17 @@ class _DeviceSetupPageState extends State<DeviceSetupPage> {
         });
         final info = await _wifiService.getDeviceInfo();
         if (!mounted) return;
+        final expected = widget.deviceToReconnect;
+        if (expected != null &&
+            (info.deviceId != expected.deviceId ||
+                info.deviceTypeId != expected.deviceTypeId ||
+                (info.serialNumber.isNotEmpty &&
+                    info.serialNumber != expected.serialNumber))) {
+          throw const WifiProvisioningException(
+            code: 'DEVICE_IDENTITY_MISMATCH',
+            message: 'This is a different device. Connect to the setup network of the device you selected.',
+          );
+        }
         _localDeviceInfo = info;
         setState(() => _verificationMessage = 'Finding nearby Wi-Fi networks…');
         await _loadNearbyNetworks(info.deviceId);
@@ -169,7 +204,7 @@ class _DeviceSetupPageState extends State<DeviceSetupPage> {
         );
       }
 
-      if (!deviceType.isAvailable) {
+      if (!deviceType.isAvailable && !_reconnecting) {
         throw WifiProvisioningException(
           message:
               '${deviceType.deviceTypeName} '
@@ -221,9 +256,9 @@ class _DeviceSetupPageState extends State<DeviceSetupPage> {
         );
       }
 
-      final currentUser = FirebaseAuth.instance.currentUser;
+      final currentUid = _currentUid;
 
-      if (currentUser == null) {
+      if (currentUid == null) {
         throw const WifiProvisioningException(
           message:
               'Your session has expired. '
@@ -232,7 +267,7 @@ class _DeviceSetupPageState extends State<DeviceSetupPage> {
       }
 
       if (registryRecord.status != 'unclaimed' &&
-          registryRecord.claimedByUid != currentUser.uid) {
+          registryRecord.claimedByUid != currentUid) {
         throw const WifiProvisioningException(
           message:
               'This device is already registered '
@@ -240,9 +275,14 @@ class _DeviceSetupPageState extends State<DeviceSetupPage> {
         );
       }
 
-      if (!mounted) {
-        return;
+      if (_reconnecting &&
+          (registryRecord.status != 'claimed' ||
+              registryRecord.claimedByUid != currentUid)) {
+        throw const DeviceClaimException(
+          'Only the current owner can change this device’s Wi-Fi.',
+        );
       }
+      if (!mounted) return;
 
       setState(() {
         // The attached firmware only reports ID and type. Missing display
@@ -308,6 +348,19 @@ class _DeviceSetupPageState extends State<DeviceSetupPage> {
     });
 
     try {
+      if (_reconnecting) {
+        final registry = await _readRegistry(
+          () => _deviceRegistryService.getDevice(deviceInfo.deviceId),
+        );
+        if (!mounted) return;
+        if (_currentUid == null ||
+            registry?.status != 'claimed' ||
+            registry?.claimedByUid != _currentUid) {
+          throw const DeviceClaimException(
+            'Only the current owner can change this device’s Wi-Fi.',
+          );
+        }
+      }
       await _wifiService.connectToSetupNetwork(config: widget.config);
       if (!mounted) return;
       final currentInfo = await _wifiService.getDeviceInfo();
@@ -371,7 +424,7 @@ class _DeviceSetupPageState extends State<DeviceSetupPage> {
       _showError(
         _provisionStatus?.isConnected == true
             ? 'Wi-Fi is configured. Restore your phone’s internet connection '
-                  'and retry adding the device. ${_friendlyError(error)}'
+                  'and retry saving setup. ${_friendlyError(error)}'
             : _friendlyError(error),
       );
     } finally {
@@ -475,11 +528,20 @@ class _DeviceSetupPageState extends State<DeviceSetupPage> {
       throw const DeviceClaimException('Device information is unavailable.');
     }
 
+    if (_provisionStatus?.hasConfirmedConnection != true) {
+      throw const DeviceClaimException(
+        'The device has not confirmed its Wi-Fi connection.',
+      );
+    }
     await _wifiService.waitForInternet();
     if (!mounted) return;
 
     await _deviceClaimService
-        .claimDevice(deviceInfo: deviceInfo)
+        .claimDevice(
+          deviceInfo: deviceInfo,
+          wifiConfirmation: _provisionStatus,
+          requireExistingOwner: _reconnecting,
+        )
         .timeout(const Duration(seconds: 30));
   }
 
@@ -553,7 +615,7 @@ class _DeviceSetupPageState extends State<DeviceSetupPage> {
     if (error is FirebaseException) {
       if (error.code == 'permission-denied') {
         return 'Your account cannot access this device registry record. '
-            'Check that the device is registered and available to claim.';
+            'Check that the device belongs to your account and the current Firestore setup rules are deployed.';
       }
       if (error.code == 'unavailable' || error.code == 'deadline-exceeded') {
         return 'The device identity was read, but its cloud registration could not be checked. '
@@ -577,7 +639,9 @@ class _DeviceSetupPageState extends State<DeviceSetupPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Device Setup')),
+      appBar: AppBar(
+        title: Text(_reconnecting ? 'Change Wi-Fi' : 'Device Setup'),
+      ),
       body: SafeArea(
         child: LayoutBuilder(
           builder: (context, constraints) {
@@ -612,14 +676,16 @@ class _DeviceSetupPageState extends State<DeviceSetupPage> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          'Set up your device',
+          _reconnecting ? 'Change device Wi-Fi' : 'Set up your device',
           style: theme.textTheme.headlineSmall?.copyWith(
             fontWeight: FontWeight.w700,
           ),
         ),
         const SizedBox(height: 8),
         Text(
-          _deviceInfo == null
+          _reconnecting
+              ? 'Reconnect ${widget.deviceToReconnect!.deviceName} while keeping it on your account.'
+              : _deviceInfo == null
               ? 'Connect the device to Yening Ecos.'
               : 'Configure $_deviceDisplayName '
                     'and add it to your account.',
@@ -632,15 +698,16 @@ class _DeviceSetupPageState extends State<DeviceSetupPage> {
   }
 
   Widget _buildStepIndicator() {
-    const steps = <_SetupStep>[
+    final steps = <_SetupStep>[
       _SetupStep(number: 1, label: 'Connect'),
       _SetupStep(number: 2, label: 'Verify'),
       _SetupStep(number: 3, label: 'Wi-Fi'),
-      _SetupStep(number: 4, label: 'Claim'),
+      _SetupStep(number: 4, label: _reconnecting ? 'Save' : 'Claim'),
       _SetupStep(number: 5, label: 'Done'),
     ];
 
     final currentNumber = switch (_stage) {
+      DeviceSetupStage.preparingDevice => 1,
       DeviceSetupStage.connectingToDevice => 1,
       DeviceSetupStage.verifyingDevice => 2,
       DeviceSetupStage.enteringWifi => 3,
@@ -671,6 +738,24 @@ class _DeviceSetupPageState extends State<DeviceSetupPage> {
 
   Widget _buildBody(BuildContext context) {
     switch (_stage) {
+      case DeviceSetupStage.preparingDevice:
+        return _SetupCard(
+          icon: Icons.wifi_rounded,
+          title: 'Keep your device nearby',
+          description: 'Power on the device. If its setup Wi-Fi is not visible, hold its BOOT/setup button for 5 seconds while it is running. This opens setup without removing your device from your account. After Wi-Fi settings are erased, setup opens automatically.',
+          child: Padding(
+            padding: const EdgeInsets.only(top: 20),
+            child: SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
+                onPressed: _beginSetup,
+                icon: const Icon(Icons.wifi_find_rounded),
+                label: const Text('Connect to device'),
+              ),
+            ),
+          ),
+        );
+
       case DeviceSetupStage.connectingToDevice:
         return _buildConnectingState(context);
 
@@ -832,10 +917,12 @@ class _DeviceSetupPageState extends State<DeviceSetupPage> {
   Widget _buildClaimingState(BuildContext context) {
     return _SetupCard(
       icon: Icons.person_add_alt_1_rounded,
-      title: 'Adding device to your account',
-      description:
-          'The Wi-Fi connection is complete. '
-          'Yening Ecos is now associating this physical device with your account.',
+      title: _reconnecting
+          ? 'Saving Wi-Fi setup'
+          : 'Adding device to your account',
+      description: _reconnecting
+          ? 'The device confirmed its Wi-Fi connection. Saving its updated setup status.'
+          : 'The Wi-Fi connection is complete. Yening Ecos is now associating this physical device with your account.',
       child: const Padding(
         padding: EdgeInsets.only(top: 20),
         child: Row(
@@ -860,8 +947,10 @@ class _DeviceSetupPageState extends State<DeviceSetupPage> {
 
     return _SetupCard(
       icon: Icons.check_circle_rounded,
-      title: 'Device setup complete',
-      description: 'Your device’s Wi-Fi is configured and it is registered to your account.',
+      title: _reconnecting ? 'Wi-Fi updated' : 'Device setup complete',
+      description: _reconnecting
+          ? 'Your device is connected to the selected Wi-Fi and remains on your account.'
+          : 'Your device’s Wi-Fi is configured and it is registered to your account.',
       child: Column(
         children: [
           const SizedBox(height: 20),
@@ -917,7 +1006,9 @@ class _DeviceSetupPageState extends State<DeviceSetupPage> {
                   onPressed: _isBusy ? null : _retry,
                   child: Text(
                     _provisionStatus?.isConnected == true
-                        ? 'Retry Registration'
+                        ? (_reconnecting
+                              ? 'Retry update'
+                              : 'Retry Registration')
                         : 'Try Again',
                   ),
                 ),

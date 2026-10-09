@@ -11,6 +11,10 @@ enum TemperatureUnit {
 
   double fromCelsius(double value) =>
       this == celsius ? value : value * 9 / 5 + 32;
+
+  /// Differences scale between units without the absolute-temperature offset.
+  double differenceFromCelsius(double value) =>
+      this == celsius ? value : value * 9 / 5;
 }
 
 class TemperatureUnitPreference extends ValueNotifier<TemperatureUnit> {

@@ -16,6 +16,7 @@ import 'package:yening_ecos/features/devices/services/device_details_service.dar
 import 'package:yening_ecos/features/devices/services/user_devices_service.dart';
 import 'package:yening_ecos/features/devices/widgets/device_telemetry_panel.dart';
 import 'package:yening_ecos/features/devices/widgets/telemetry_gauge.dart';
+import 'package:yening_ecos/features/devices/widgets/user_device_card.dart';
 import 'package:yening_ecos/features/devices/widgets/temperature_unit_selector.dart';
 import 'package:yening_ecos/features/home/home_page.dart';
 
@@ -142,6 +143,49 @@ void main() {
         ),
         findsNothing,
       );
+      expect(find.text('Relative humidity'), findsOneWidget);
+      expect(find.text('Relative brightness'), findsOneWidget);
+      expect(find.text('62.3% RH'), findsOneWidget);
+      expect(find.text('78.4%'), findsOneWidget);
+      expect(
+        tester.widget<TelemetryGauge>(humidity).semanticUnit,
+        'percent relative humidity',
+      );
+      expect(
+        tester.widget<TelemetryGauge>(light).semanticUnit,
+        'percent relative brightness',
+      );
+      for (final entry in [
+        ('Temperature', temperature),
+        ('Humidity', humidity),
+      ]) {
+        await tester.tap(
+          find.descendant(
+            of: entry.$2,
+            matching: find.byIcon(Icons.info_outline_rounded),
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(find.text('About ${entry.$1}'), findsOneWidget);
+        await tester.tap(find.byTooltip('Close information'));
+        await tester.pumpAndSettle();
+      }
+      await tester.tap(
+        find.descendant(
+          of: light,
+          matching: find.byIcon(Icons.info_outline_rounded),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('About Light'), findsOneWidget);
+      expect(find.textContaining('not a lux measurement'), findsOneWidget);
+      expect(find.textContaining('dark (0%)'), findsOneWidget);
+      expect(
+        find.textContaining('differences use percentage points'),
+        findsOneWidget,
+      );
+      await tester.tap(find.byTooltip('Close information'));
+      await tester.pumpAndSettle();
       expect(tester.getSize(temperature), tester.getSize(humidity));
       expect(tester.getSize(temperature), tester.getSize(light));
       final value = tester.widget<Text>(find.text('28.5°C'));
@@ -248,6 +292,7 @@ void main() {
       brightness: Brightness.light,
       scale: 1.0,
       details: false,
+      offline: false,
     ),
     (
       name: 'home-dark',
@@ -255,6 +300,7 @@ void main() {
       brightness: Brightness.dark,
       scale: 1.0,
       details: false,
+      offline: false,
     ),
     (
       name: 'home-tablet',
@@ -262,6 +308,7 @@ void main() {
       brightness: Brightness.light,
       scale: 1.0,
       details: false,
+      offline: false,
     ),
     (
       name: 'details-phone',
@@ -269,6 +316,7 @@ void main() {
       brightness: Brightness.light,
       scale: 1.0,
       details: true,
+      offline: false,
     ),
     (
       name: 'details-large-text',
@@ -276,6 +324,7 @@ void main() {
       brightness: Brightness.light,
       scale: 1.5,
       details: true,
+      offline: false,
     ),
     (
       name: 'details-largest-text',
@@ -283,6 +332,39 @@ void main() {
       brightness: Brightness.dark,
       scale: 2.0,
       details: true,
+      offline: false,
+    ),
+    (
+      name: 'home-offline-phone',
+      size: const Size(390, 844),
+      brightness: Brightness.light,
+      scale: 1.0,
+      details: false,
+      offline: true,
+    ),
+    (
+      name: 'home-offline-dark',
+      size: const Size(390, 844),
+      brightness: Brightness.dark,
+      scale: 1.0,
+      details: false,
+      offline: true,
+    ),
+    (
+      name: 'details-offline-phone',
+      size: const Size(390, 844),
+      brightness: Brightness.light,
+      scale: 1.0,
+      details: true,
+      offline: true,
+    ),
+    (
+      name: 'details-offline-large-text',
+      size: const Size(320, 1200),
+      brightness: Brightness.dark,
+      scale: 2.0,
+      details: true,
+      offline: true,
     ),
   ]) {
     testWidgets(
@@ -299,7 +381,7 @@ void main() {
           humidityUpdatedAt: capturedAt.subtract(const Duration(seconds: 1)),
           lightUpdatedAt: capturedAt,
           lastSeen: capturedAt,
-          isOnline: true,
+          isOnline: !scene.offline,
           isCloudConnected: true,
         );
         final boundaryKey = GlobalKey();
@@ -374,9 +456,52 @@ void main() {
         );
         await tester.pumpAndSettle();
         expect(find.text('28.5°C'), findsOneWidget);
-        expect(find.text('62.3%'), findsOneWidget);
+        expect(find.text('62.3% RH'), findsOneWidget);
         expect(find.text('78.4%'), findsOneWidget);
         expect(find.byType(TemperatureUnitSelector), findsOneWidget);
+        expect(
+          find.descendant(
+            of: find.byType(UserDeviceCard),
+            matching: find.text(
+              scene.offline ? 'Device offline' : 'Device online',
+            ),
+          ),
+          findsOneWidget,
+        );
+        if (scene.offline) {
+          expect(find.text('Updates paused'), findsOneWidget);
+          expect(find.text('Offline'), findsNWidgets(3));
+          expect(find.text('Last reading'), findsNWidgets(3));
+          expect(
+            find.byKey(const ValueKey('offline-readings-notice')),
+            findsOneWidget,
+          );
+          for (final gauge in tester.widgetList<TelemetryGauge>(
+            find.byType(TelemetryGauge),
+          )) {
+            expect(gauge.readingColor, const Color(0xFF757575));
+            final controlScheme = Theme.of(
+              tester.element(
+                find.byKey(
+                  ValueKey('edit-target-${gauge.label.toLowerCase()}'),
+                ),
+              ),
+            ).colorScheme;
+            expect(
+              controlScheme.surfaceContainerLow,
+              scene.brightness == Brightness.dark
+                  ? const Color(0xFF252629)
+                  : const Color(0xFFE8EAED),
+            );
+            expect(
+              controlScheme.primary,
+              scene.brightness == Brightness.dark
+                  ? const Color(0xFFBFC3C7)
+                  : const Color(0xFF656B70),
+            );
+          }
+        }
+
         final heartbeatBottom = tester
             .getBottomLeft(find.byKey(const ValueKey('telemetry-updated-time')))
             .dy;
@@ -398,6 +523,29 @@ void main() {
           'light-meter',
         ].map((key) => tester.getSize(find.byKey(ValueKey(key))));
         expect(meterSizes.toSet(), hasLength(1));
+        if (scene.name != 'home-tablet') {
+          final summaryWidth = tester
+              .getSize(find.byType(UserDeviceCard))
+              .width;
+          for (final size in meterSizes) {
+            expect(
+              size.width,
+              summaryWidth,
+              reason: 'monitoring cards align with the device summary without an inset',
+            );
+          }
+          if (scene.offline) {
+            expect(
+              tester
+                  .getSize(
+                    find.byKey(const ValueKey('offline-readings-notice')),
+                  )
+                  .width,
+              summaryWidth,
+            );
+          }
+        }
+
         if (scene.name == 'home-tablet') {
           final temperature = tester.getTopLeft(
             find.byKey(const ValueKey('temperature-meter')),

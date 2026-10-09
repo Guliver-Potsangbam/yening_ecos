@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:yening_ecos/features/devices/device_details_page.dart';
 
 import '../../core/preferences/temperature_unit_preference.dart';
 import '../../core/ui/monitoring_background.dart';
@@ -6,7 +7,6 @@ import '../devices/models/user_device.dart';
 import '../devices/services/device_telemetry_service.dart';
 import '../devices/services/user_devices_service.dart';
 import '../devices/widgets/device_telemetry_panel.dart';
-import '../devices/widgets/user_device_card.dart';
 import 'widgets/home_empty_state.dart';
 
 class HomePage extends StatefulWidget {
@@ -176,15 +176,24 @@ class _HomePageState extends State<HomePage> {
                         child: ListView(
                           padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
                           children: [
-                            UserDeviceCard(
+                            DeviceTelemetryPanel(
                               key: ValueKey(device.deviceId),
                               device: device,
                               showSerialNumber: false,
-                              telemetry: DeviceTelemetryPanel(
-                                deviceId: device.deviceId,
-                                telemetrySource: widget.telemetrySource,
-                                unitPreference: widget.unitPreference,
-                              ),
+                              deviceId: device.deviceId,
+                              telemetrySource: widget.telemetrySource,
+                              unitPreference: widget.unitPreference,
+                              onDeviceTap: () {
+                                Navigator.of(context).push(
+                                  MaterialPageRoute(
+                                    builder: (_) => DeviceDetailsPage(
+                                      device: device,
+                                      telemetrySource: widget.telemetrySource,
+                                      unitPreference: widget.unitPreference,
+                                    ),
+                                  ),
+                                );
+                              },
                             ),
                           ],
                         ),

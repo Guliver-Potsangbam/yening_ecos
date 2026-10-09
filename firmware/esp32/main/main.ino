@@ -54,6 +54,8 @@ bool connectionQueued = false;
 bool saveAfterConnection = false;
 bool shutdownScheduled = false;
 bool firebaseInitialized = false;
+bool rollbackPending = false;
+uint32_t rollbackAt = 0;
 bool resetButtonHeld = false;
 bool resetButtonHandled = false;
 
@@ -153,6 +155,7 @@ void cancelScan() {
 }
 
 void queueWiFiConnection(const String &ssid, const String &password, bool saveOnSuccess) {
+  rollbackPending = false;
   targetSSID = ssid;
   targetPassword = password;
   saveAfterConnection = saveOnSuccess;
@@ -247,6 +250,7 @@ bool resetSavedWiFi() {
   const bool cleared = prefs.clear();
   prefs.end();
   if (!cleared) return false;
+  rollbackPending = false;
   connectionQueued = false;
   shutdownScheduled = false;
   saveAfterConnection = false;
@@ -316,6 +320,12 @@ bool startSetupPortal() {
 }
 
 void failWiFiConnection(const char *reason) {
+  // Leave failure visible to the app before restoring the previous network.
+  // A retry cancels this pending rollback. New credentials never replace the
+  // stored pair until the new network has actually connected.
+  rollbackPending = saveAfterConnection && validSSID(savedSSID);
+  rollbackAt = millis() + WIFI_ROLLBACK_DELAY_MS;
+  saveAfterConnection = false;
   provisioningState = ProvisioningState::Failed;
   provisioningError = reason;
   connectionQueued = false;
@@ -329,6 +339,12 @@ void failWiFiConnection(const char *reason) {
 
 void processProvisioning() {
   if (connectionQueued) return;
+  if (rollbackPending && provisioningState == ProvisioningState::Failed &&
+      static_cast<int32_t>(millis() - rollbackAt) >= 0) {
+    queueWiFiConnection(savedSSID, savedPassword, false);
+    Serial.println("Restoring the previous Wi-Fi after a failed replacement.");
+    return;
+  }
   if (provisioningState == ProvisioningState::Connecting) {
     if (WiFi.status() == WL_CONNECTED && WiFi.SSID() == targetSSID &&
         WiFi.localIP() != IPAddress(0, 0, 0, 0)) {
@@ -378,7 +394,14 @@ void processResetButton() {
   }
   if (!resetButtonHandled && millis() - resetButtonPressedAt >= RESET_HOLD_MS) {
     resetButtonHandled = true;
-    if (!resetSavedWiFi()) Serial.println("Wi-Fi reset failed: storage unavailable.");
+    if (startSetupPortal()) {
+      // Opening setup is not a factory reset and does not clear the saved pair.
+      shutdownScheduled = provisioningState == ProvisioningState::Connected;
+      portalShutdownAt = millis() + WIFI_EDIT_PORTAL_GRACE_MS;
+      Serial.println("Wi-Fi setup reopened. Saved credentials are retained until a new connection succeeds.");
+    } else {
+      Serial.println("Could not reopen Wi-Fi setup.");
+    }
   }
 }
 

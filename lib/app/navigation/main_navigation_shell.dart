@@ -10,24 +10,31 @@ import 'widgets/app_drawer.dart';
 import 'widgets/app_top_bar.dart';
 
 class MainNavigationShell extends StatefulWidget {
-  const MainNavigationShell({super.key});
+  const MainNavigationShell({
+    super.key,
+    this.pages,
+    this.profileBuilder,
+    this.authService,
+  }) : assert(pages == null || pages.length == 3);
+
+  final List<Widget>? pages;
+  final WidgetBuilder? profileBuilder;
+  final AuthService? authService;
 
   @override
   State<MainNavigationShell> createState() => _MainNavigationShellState();
 }
 
 class _MainNavigationShellState extends State<MainNavigationShell> {
-  final AuthService _authService = AuthService();
+  late final AuthService _authService = widget.authService ?? AuthService();
 
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
 
   int _currentIndex = 0;
 
-  late final List<Widget> _pages = [
-    const HomePage(),
-    const DevicesPage(),
-    const AlertsPage(),
-  ];
+  late final List<Widget> _pages =
+      widget.pages ??
+      [const HomePage(), const DevicesPage(), const AlertsPage()];
 
   String get _currentSectionTitle {
     return switch (_currentIndex) {
@@ -73,8 +80,9 @@ class _MainNavigationShellState extends State<MainNavigationShell> {
   }
 
   void _openProfile() {
-    Navigator.of(context)
-        .push(MaterialPageRoute(builder: (_) => ProfilePage()));
+    Navigator.of(context).push(
+      MaterialPageRoute(builder: widget.profileBuilder ?? (_) => ProfilePage()),
+    );
   }
 
   Future<void> _signOut() async {

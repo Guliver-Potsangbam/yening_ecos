@@ -13,6 +13,7 @@ import 'package:yening_ecos/features/devices/services/device_details_service.dar
 import 'package:yening_ecos/features/devices/services/user_devices_service.dart';
 import 'package:yening_ecos/features/devices/widgets/device_telemetry_panel.dart';
 import 'package:yening_ecos/features/devices/widgets/telemetry_gauge.dart';
+import 'package:yening_ecos/features/devices/widgets/user_device_card.dart';
 import 'package:yening_ecos/features/home/home_page.dart';
 
 void main() {
@@ -164,7 +165,7 @@ void main() {
       );
       await tester.pumpAndSettle();
       expect(find.text('25.0°C'), findsOneWidget);
-      expect(find.text('61.5%'), findsOneWidget);
+      expect(find.text('61.5% RH'), findsOneWidget);
       expect(find.text('43.2%'), findsOneWidget);
       expect(find.text('Light'), findsOneWidget);
       expect(find.text('Low light'), findsOneWidget);
@@ -194,7 +195,7 @@ void main() {
       );
       await tester.pumpAndSettle();
       expect(find.text('86.0°F'), findsOneWidget);
-      expect(find.text('50.0%'), findsOneWidget);
+      expect(find.text('50.0% RH'), findsOneWidget);
       expect(find.text('82.5%'), findsOneWidget);
       await tester.pumpWidget(const SizedBox());
       unawaited(devices.close());
@@ -244,7 +245,8 @@ void main() {
       );
       await tester.pumpAndSettle();
       expect(find.text('0.0°C'), findsOneWidget);
-      expect(find.text('0.0%'), findsNWidgets(2));
+      expect(find.text('0.0% RH'), findsOneWidget);
+      expect(find.text('0.0%'), findsOneWidget);
       expect(find.text('Light'), findsOneWidget);
       expect(find.text('Dark'), findsOneWidget);
       await tester.tap(find.text('°F'));
@@ -289,7 +291,7 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      expect(find.text('No recent updates'), findsOneWidget);
+      expect(find.text('Device offline'), findsOneWidget);
       expect(find.text('24.0°C'), findsOneWidget);
       readings.addError(
         FirebaseException(
@@ -303,6 +305,255 @@ void main() {
         findsOneWidget,
       );
       expect(find.text('Retry readings'), findsOneWidget);
+      await tester.pumpWidget(const SizedBox());
+      expect(readings.hasListener, isFalse);
+    },
+  );
+
+  testWidgets(
+    'heartbeat silence changes online to offline without a Firebase event',
+    (tester) async {
+      final readings = StreamController<DeviceTelemetry>.broadcast();
+      addTearDown(readings.close);
+      var now = DateTime.utc(2026, 10, 8, 12);
+      final capturedAt = now;
+      final panel = DeviceTelemetryPanel(
+        deviceId: device.deviceId,
+        telemetrySource: (_) => readings.stream,
+        unitPreference: units,
+        now: () => now,
+      );
+      await tester.pumpWidget(MaterialApp(home: Scaffold(body: panel)));
+      DeviceTelemetry reading({bool cloudConnected = true}) => DeviceTelemetry(
+        temperatureCelsius: 25,
+        humidity: 60,
+        lightPercent: 40,
+        temperatureUpdatedAt: now,
+        humidityUpdatedAt: now,
+        lightUpdatedAt: now,
+        lastSeen: now,
+        isOnline: true,
+        isCloudConnected: cloudConnected,
+      );
+      readings.add(reading());
+      await tester.pumpAndSettle();
+      expect(find.text('Device online'), findsOneWidget);
+      expect(find.text('Live'), findsNWidgets(3));
+      now = capturedAt.add(const Duration(seconds: 12));
+      // The local timer rechecks the retained snapshot; the stream stays silent.
+      await tester.pump(const Duration(seconds: 2));
+      expect(find.text('Device offline'), findsOneWidget);
+      expect(find.text('Offline'), findsNWidgets(3));
+      expect(find.text('Live'), findsNothing);
+      expect(find.text('25.0°C'), findsOneWidget);
+      readings.add(reading());
+      await tester.pumpAndSettle();
+      expect(find.text('Device online'), findsOneWidget);
+      expect(find.text('Live'), findsNWidgets(3));
+      readings.add(reading(cloudConnected: false));
+      await tester.pumpAndSettle();
+      expect(find.text('Reconnecting to live readings'), findsOneWidget);
+      expect(find.text('Device offline'), findsNothing);
+      expect(find.text('Reconnecting'), findsNWidgets(3));
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
+
+  testWidgets(
+    'offline cards retain readings and recover using one subscription',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(390, 844));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final readings = StreamController<DeviceTelemetry>.broadcast();
+      addTearDown(readings.close);
+      var now = DateTime.utc(2026, 10, 8, 12);
+      final capturedAt = now;
+      var watches = 0;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: SingleChildScrollView(
+              child: DeviceTelemetryPanel(
+                deviceId: device.deviceId,
+                device: device,
+                now: () => now,
+                unitPreference: units,
+                telemetrySource: (_) {
+                  watches++;
+                  return readings.stream;
+                },
+              ),
+            ),
+          ),
+        ),
+      );
+      DeviceTelemetry sample({
+        bool online = true,
+        bool cloud = true,
+        bool empty = false,
+      }) => DeviceTelemetry(
+        temperatureCelsius: empty ? null : 25,
+        humidity: empty ? null : 60,
+        lightPercent: empty ? null : 40,
+        temperatureUpdatedAt: empty ? null : now,
+        humidityUpdatedAt: empty ? null : now,
+        lightUpdatedAt: empty ? null : now,
+        lastSeen: now,
+        isOnline: online,
+        isCloudConnected: cloud,
+      );
+      readings.add(sample());
+      await tester.pumpAndSettle();
+      final sizes = [
+        for (final key in [
+          'temperature-meter',
+          'humidity-meter',
+          'light-meter',
+        ])
+          tester.getSize(find.byKey(ValueKey(key))),
+      ];
+      expect(
+        find.descendant(
+          of: find.byType(UserDeviceCard),
+          matching: find.text('Device online'),
+        ),
+        findsOneWidget,
+      );
+      now = capturedAt.add(const Duration(seconds: 12));
+      await tester.pump(const Duration(seconds: 2));
+      final semantics = tester.ensureSemantics();
+      expect(
+        find.descendant(
+          of: find.byType(UserDeviceCard),
+          matching: find.text('Device offline'),
+        ),
+        findsOneWidget,
+      );
+      expect(find.text('Offline'), findsNWidgets(3));
+      expect(find.text('Last reading'), findsNWidgets(3));
+      expect(find.text('Updates paused'), findsOneWidget);
+      expect(
+        find.text('Showing last received values, not current conditions.'),
+        findsOneWidget,
+      );
+      final summaryWidth = tester.getSize(find.byType(UserDeviceCard)).width;
+      expect(
+        tester
+            .getSize(find.byKey(const ValueKey('sensor-readings-section')))
+            .width,
+        summaryWidth,
+      );
+      expect(
+        tester
+            .getSize(find.byKey(const ValueKey('offline-readings-notice')))
+            .width,
+        summaryWidth,
+      );
+      for (final key in [
+        'temperature-meter',
+        'humidity-meter',
+        'light-meter',
+      ]) {
+        expect(
+          tester.getSize(find.byKey(ValueKey(key))).width,
+          summaryWidth,
+          reason: 'offline meters use the full device-summary width',
+        );
+        expect(
+          tester.getTopLeft(find.byKey(ValueKey(key))).dx,
+          tester.getTopLeft(find.byType(UserDeviceCard)).dx,
+        );
+      }
+
+      expect(find.text('25.0°C'), findsOneWidget);
+      expect(find.text('60.0% RH'), findsOneWidget);
+      expect(find.text('40.0%'), findsOneWidget);
+      expect(
+        find.bySemanticsLabel(
+          'Temperature: 25.0 Celsius, Offline, last reading',
+        ),
+        findsOneWidget,
+      );
+      var index = 0;
+      for (final gauge in tester.widgetList<TelemetryGauge>(
+        find.byType(TelemetryGauge),
+      )) {
+        expect(gauge.readingColor, const Color(0xFF757575));
+        expect(tester.getSize(find.byKey(gauge.key!)), sizes[index++]);
+        expect(
+          find.descendant(
+            of: find.byKey(gauge.key!),
+            matching: find.byWidgetPredicate(
+              (widget) =>
+                  widget is DecoratedBox &&
+                  widget.decoration is BoxDecoration &&
+                  (widget.decoration as BoxDecoration).color ==
+                      const Color(0xFFE8EAED),
+            ),
+          ),
+          findsWidgets,
+        );
+        final badge = tester.widget<Container>(
+          find.byKey(ValueKey('metric-freshness-${gauge.label}')),
+        );
+        expect(
+          (badge.decoration as BoxDecoration).color,
+          const Color(0xFF8D5A16).withValues(alpha: 0.12),
+        );
+      }
+      final temperatureControlScheme = Theme.of(
+        tester.element(find.byKey(const ValueKey('edit-target-temperature'))),
+      ).colorScheme;
+      expect(temperatureControlScheme.primary, const Color(0xFF656B70));
+      expect(temperatureControlScheme.onSurface, const Color(0xFF555B60));
+      await tester.tap(find.text('°F'));
+      await tester.pumpAndSettle();
+      expect(
+        find.text('77.0°F'),
+        findsOneWidget,
+        reason: 'offline styling preserves local unit conversion',
+      );
+      await tester.tap(find.text('°C'));
+      await tester.pumpAndSettle();
+      expect(watches, 1);
+      readings.add(sample(cloud: false));
+      await tester.pumpAndSettle();
+      expect(find.text('Device offline'), findsNothing);
+      expect(find.text('Reconnecting'), findsNWidgets(3));
+      readings.add(sample());
+      await tester.pumpAndSettle();
+      expect(find.text('Device online'), findsOneWidget);
+      expect(find.text('Live'), findsNWidgets(3));
+      expect(find.text('Last reading'), findsNothing);
+      final restoredScheme = Theme.of(
+        tester.element(find.byKey(const ValueKey('edit-target-temperature'))),
+      ).colorScheme;
+      expect(
+        restoredScheme.primary,
+        Theme.of(tester.element(find.byType(DeviceTelemetryPanel)))
+            .colorScheme
+            .primary,
+      );
+
+      expect(find.text('Updates paused'), findsNothing);
+      expect(
+        tester.getSize(find.byKey(const ValueKey('temperature-meter'))).width,
+        summaryWidth,
+      );
+
+      expect(
+        find.byKey(const ValueKey('offline-readings-notice')),
+        findsNothing,
+      );
+      readings.add(sample(online: false, empty: true));
+      await tester.pumpAndSettle();
+      expect(find.text('Device offline'), findsOneWidget);
+      expect(find.text('Offline'), findsNWidgets(3));
+      expect(find.text('Waiting'), findsNothing);
+      expect(find.text('—'), findsNWidgets(3));
+      expect(watches, 1);
+      expect(tester.takeException(), isNull);
+      semantics.dispose();
       await tester.pumpWidget(const SizedBox());
       expect(readings.hasListener, isFalse);
     },
@@ -339,7 +590,7 @@ void main() {
         expect(find.text(entry.value), findsOneWidget);
         expect(
           find.bySemanticsLabel(
-            'Light: ${entry.key.toStringAsFixed(1)} %, ${entry.value}',
+            'Light: ${entry.key.toStringAsFixed(1)} percent relative brightness, ${entry.value}',
           ),
           findsOneWidget,
         );
@@ -391,8 +642,8 @@ void main() {
       );
       await tester.pumpAndSettle();
       expect(find.text('28.5°C'), findsOneWidget);
-      expect(find.text('62.3%'), findsOneWidget);
-      expect(find.text('Dark'), findsOneWidget);
+      expect(find.text('62.3% RH'), findsOneWidget);
+      expect(find.text('Last reading'), findsNWidgets(3));
       expect(
         tester
             .widget<Text>(find.byKey(const ValueKey('telemetry-updated-time')))
@@ -404,7 +655,7 @@ void main() {
           tester
               .widget<Text>(find.byKey(ValueKey('$metric-updated-time')))
               .data,
-          'Updated 2:30:${(tick * 2).toString().padLeft(2, '0')} PM',
+          'Last updated 2:30:${(tick * 2).toString().padLeft(2, '0')} PM',
         );
       }
       await tester.pump(const Duration(seconds: 2));
@@ -459,26 +710,26 @@ void main() {
       );
       await tester.pumpAndSettle();
       expect(find.text('24.0°C'), findsOneWidget);
-      expect(find.text('60.0%'), findsOneWidget);
+      expect(find.text('60.0% RH'), findsOneWidget);
       expect(
         tester
             .widget<Text>(
               find.byKey(const ValueKey('temperature-updated-time')),
             )
             .data,
-        'Updated 9:41:00 AM',
+        'Last updated 9:41:00 AM',
       );
       expect(
         tester
             .widget<Text>(find.byKey(const ValueKey('humidity-updated-time')))
             .data,
-        'Updated 9:41:01 AM',
+        'Last updated 9:41:01 AM',
       );
       expect(
         tester
             .widget<Text>(find.byKey(const ValueKey('light-updated-time')))
             .data,
-        'Updated 9:41:0${2 + tick * 2} AM',
+        'Last updated 9:41:0${2 + tick * 2} AM',
       );
     }
     expect(find.text('75.0%'), findsOneWidget);
@@ -489,7 +740,7 @@ void main() {
       tester
           .widget<Text>(find.byKey(const ValueKey('temperature-updated-time')))
           .data,
-      'Updated 9:41:00 AM',
+      'Last updated 9:41:00 AM',
       reason: 'changing display units cannot refresh a sensor timestamp',
     );
     await tester.pumpWidget(const SizedBox());
@@ -536,7 +787,7 @@ void main() {
           tester
               .widget<Text>(find.byKey(ValueKey('$metric-updated-time')))
               .data,
-          'Updated ${entry.clock}',
+          'Last updated ${entry.clock}',
         );
       }
     }
@@ -592,7 +843,7 @@ void main() {
       );
     }
     expect(find.text('24.0°C'), findsOneWidget);
-    expect(find.text('60.0%'), findsOneWidget);
+    expect(find.text('60.0% RH'), findsOneWidget);
     expect(find.text('75.0%'), findsOneWidget);
     await tester.pumpWidget(const SizedBox());
   });

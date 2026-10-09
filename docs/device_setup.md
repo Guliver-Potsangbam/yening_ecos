@@ -171,3 +171,27 @@ Run automated protocol tests with
 Native permissions, AP radio channel changes, and portal shutdown timing still
 require a physical Android phone and ESP32. No iOS platform project or native
 adapter is present in this repository.
+
+## Confirmed provisioning and changing Wi-Fi
+
+A confirmed Wi-Fi connection now updates `devices/<deviceId>/provisioningStatus` to `provisioned` and writes server `provisionedAt`/`updatedAt` timestamps in the same transaction as the initial claim. The confirmation must include the exact selected device identity, expected SSID, connected state, and a usable IP. No Wi-Fi password or SSID is stored in Firestore. A cloud-write failure offers a registration retry without sending credentials again.
+
+Device Details has a Change Wi-Fi action in the top toolbar. It reuses scanning, network selection, and confirmation for the selected owned device, including a device whose local Wi-Fi settings were erased. Identity is checked before scanning and again before sending credentials; ownership is checked during verification, again before a replacement is sent, and in the registration transaction. Reconfiguration cannot claim an unclaimed device or transfer ownership. Existing claim dates and custom membership names are preserved. Owners can reconnect a discontinued model whose registry definition still exists.
+
+The powered device must be within setup-Wi-Fi range. Internet/WAN access alone cannot reach an offline device. If setup is not visible while the router is working, hold BOOT/setup for five seconds while the ESP32 is running. The updated firmware opens a five-minute setup window without erasing the saved network. A router outage reopens setup after the reconnection timeout, and a boot with erased NVS settings opens setup automatically. After failed replacement credentials, the previous network is attempted after ten seconds so the app can observe the failure first. A flash must preserve the device's configured identity and include provisioning-capable firmware; erased firmware or changed device identity cannot be recovered merely by an app.
+
+Firestore rules allow an owner to update only provisioning status and its server timestamps after a claim. They continue to protect ownership, device identity, serial number, model, firmware, and other factory metadata. Rules cannot independently attest a local radio connection; that is app-observed confirmation in this development architecture. The rules must be published before the app can write the newly permitted fields:
+
+```sh
+firebase deploy --only firestore:rules --project yening-ecos-development
+```
+
+A device already marked unprovisioned is repaired by a successfully confirmed Change Wi-Fi flow, rather than a speculative bulk migration. Development recovery uses the existing setup protocol and Firebase services; no Cloud Functions or billing upgrade is introduced.
+
+Validation uses `flutter test --no-pub`, `python3 test/firmware/wifi_recovery_test.py`, the pinned Arduino sketch profile, and a local demo Firestore emulator:
+
+```sh
+firebase emulators:exec --project demo-yening-setup --config firebase.setup-emulator.json --only firestore 'node test/database/firestore_setup_rules_test.mjs'
+```
+
+Host checks exercise the actual firmware transition functions with radio/storage stand-ins, including retention, successful replacement, failed replacement, router loss, and rollover. Physical Wi-Fi and button behavior still require validation on the board.

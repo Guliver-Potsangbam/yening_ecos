@@ -21,7 +21,9 @@ static_assert(LDR_SAMPLE_COUNT > 0 && LDR_SAMPLE_COUNT <= 64, "Invalid LDR sampl
 static_assert(LDR_DARK_ADC != LDR_BRIGHT_ADC, "LDR reference readings must differ");
 static_assert(LDR_DARK_ADC <= 4095 && LDR_BRIGHT_ADC <= 4095, "LDR references must fit the 12-bit ADC");
 constexpr uint8_t RESET_BUTTON_PIN = 0;  // The Dev Module's BOOT button.
-constexpr uint32_t RESET_HOLD_MS = 5000;
+constexpr uint32_t RESET_HOLD_MS = 5000;  // Hold BOOT to reopen setup, retaining Wi-Fi.
+constexpr uint32_t WIFI_EDIT_PORTAL_GRACE_MS = 300000;
+constexpr uint32_t WIFI_ROLLBACK_DELAY_MS = 10000;
 constexpr uint32_t WIFI_JOIN_TIMEOUT_MS = 20000;
 constexpr uint32_t PORTAL_GRACE_MS = 30000;
 constexpr uint32_t SAVED_WIFI_PORTAL_GRACE_MS = 120000;

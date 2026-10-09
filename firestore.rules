@@ -41,25 +41,37 @@ service cloud.firestore {
       // controlled company tooling, not the customer app.
       allow create: if false;
 
-      // Customer app may perform only the
-      // unclaimed -> claimed transition.
+      // Only confirmed setup fields are mutable after ownership is established.
+      function validProvisioning() {
+        return request.resource.data.provisioningStatus == 'provisioned'
+          && request.resource.data.provisionedAt == request.time
+          && request.resource.data.updatedAt == request.time;
+      }
+
       allow update: if isSignedIn()
-        && resource.data.status == 'unclaimed'
-        && request.resource.data.status == 'claimed'
-        && request.resource.data.claimedByUid == request.auth.uid
         && request.resource.data.deviceId == deviceId
-        && request.resource.data.deviceTypeId
-            == resource.data.deviceTypeId
-        && request.resource.data.serialNumber
-            == resource.data.serialNumber
-        && request.resource.data.diff(resource.data)
-            .affectedKeys()
-            .hasOnly([
-              'status',
-              'claimedByUid',
-              'claimedAt',
-              'updatedAt'
-            ]);
+        && request.resource.data.deviceTypeId == resource.data.deviceTypeId
+        && request.resource.data.serialNumber == resource.data.serialNumber
+        && (
+          (resource.data.status == 'unclaimed'
+            && request.resource.data.status == 'claimed'
+            && request.resource.data.claimedByUid == request.auth.uid
+            && request.resource.data.claimedAt == request.time
+            && request.resource.data.updatedAt == request.time
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+              'status', 'claimedByUid', 'claimedAt', 'updatedAt',
+              'provisioningStatus', 'provisionedAt'
+            ])
+            && (!request.resource.data.diff(resource.data).affectedKeys()
+                  .hasAny(['provisioningStatus', 'provisionedAt'])
+                || validProvisioning()))
+          || (resource.data.status == 'claimed'
+            && resource.data.claimedByUid == request.auth.uid
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+              'provisioningStatus', 'provisionedAt', 'updatedAt'
+            ])
+            && validProvisioning())
+        );
 
       allow delete: if false;
     }

@@ -379,6 +379,7 @@ class WifiProvisioningService {
           );
         }
         if (status.isConnected &&
+            status.deviceId == expectedDeviceId &&
             status.ssid == expectedSsid &&
             status.ipAddress?.isNotEmpty == true &&
             status.ipAddress != '0.0.0.0') {

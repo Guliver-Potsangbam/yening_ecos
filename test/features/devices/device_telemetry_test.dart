@@ -315,8 +315,8 @@ void main() {
   test('freshness expires even when the firmware online flag remains true', () {
     final now = DateTime(2026, 10, 4, 12);
     final reading = DeviceTelemetry(lastSeen: now, isOnline: true);
-    expect(reading.isFreshAt(now.add(const Duration(seconds: 60))), isTrue);
-    expect(reading.isFreshAt(now.add(const Duration(seconds: 61))), isFalse);
+    expect(reading.isFreshAt(now.add(const Duration(seconds: 10))), isTrue);
+    expect(reading.isFreshAt(now.add(const Duration(seconds: 11))), isFalse);
     expect(
       DeviceTelemetry(lastSeen: now, isOnline: false).isFreshAt(now),
       isFalse,
@@ -326,6 +326,24 @@ void main() {
       isFalse,
     );
     expect(const DeviceTelemetry().isFreshAt(now), isFalse);
+  });
+
+  test('online inference rejects missing, zero and implausible heartbeats', () {
+    final now = DateTime.utc(2026, 10, 8, 12);
+    for (final seen in [
+      null,
+      DateTime.fromMillisecondsSinceEpoch(0),
+      now.add(const Duration(seconds: 31)),
+    ]) {
+      expect(
+        DeviceTelemetry(lastSeen: seen, isOnline: true).isFreshAt(now),
+        isFalse,
+      );
+    }
+    expect(
+      DeviceTelemetry(lastSeen: now, isOnline: true).isFreshAt(now),
+      isTrue,
+    );
   });
 
   test('Celsius converts correctly including freezing, boiling and negative values', () {

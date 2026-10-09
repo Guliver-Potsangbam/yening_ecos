@@ -1,4 +1,9 @@
+enum DeviceConnectionState { online, offline, reconnecting, waiting }
+
 class DeviceTelemetry {
+  // Five missed two-second upload intervals before inferring device offline.
+  static const heartbeatTimeout = Duration(seconds: 10);
+
   const DeviceTelemetry({
     this.temperatureCelsius,
     this.humidity,
@@ -18,6 +23,9 @@ class DeviceTelemetry {
   final DateTime? humidityUpdatedAt;
   final DateTime? lightUpdatedAt;
   final DateTime? lastSeen;
+
+  /// Last device-reported flag; it can remain true after abrupt disconnection.
+  /// Use isFreshAt(now) to check the heartbeat before displaying online status.
   final bool? isOnline;
   final bool? isCloudConnected;
 
@@ -34,8 +42,19 @@ class DeviceTelemetry {
   bool get hasReadings =>
       temperatureCelsius != null || humidity != null || lightPercent != null;
 
+  DeviceConnectionState connectionStateAt(DateTime now) {
+    if (isCloudConnected == false) return DeviceConnectionState.reconnecting;
+    final hasHeartbeat = (lastSeen?.millisecondsSinceEpoch ?? 0) > 0;
+    if (isOnline == false || (hasHeartbeat && !isFreshAt(now))) {
+      return DeviceConnectionState.offline;
+    }
+    return isFreshAt(now)
+        ? DeviceConnectionState.online
+        : DeviceConnectionState.waiting;
+  }
+
   bool isFreshAt(DateTime now) {
-    return _isTimestampFreshAt(lastSeen, now);
+    return _isTimestampFreshAt(lastSeen, now, maximumAge: heartbeatTimeout);
   }
 
   bool isTemperatureFreshAt(DateTime now) => _isReadingFreshAt(
@@ -75,13 +94,19 @@ class DeviceTelemetry {
       value <= maximum &&
       _isTimestampFreshAt(updatedAt, now);
 
-  bool _isTimestampFreshAt(DateTime? updatedAt, DateTime now) {
-    if (updatedAt == null || isOnline == false || isCloudConnected == false) {
+  bool _isTimestampFreshAt(
+    DateTime? updatedAt,
+    DateTime now, {
+    Duration maximumAge = const Duration(seconds: 60),
+  }) {
+    if (updatedAt == null ||
+        updatedAt.millisecondsSinceEpoch <= 0 ||
+        isOnline == false ||
+        isCloudConnected == false) {
       return false;
     }
     final age = now.difference(updatedAt);
-    return age >= const Duration(seconds: -30) &&
-        age <= const Duration(seconds: 60);
+    return age >= const Duration(seconds: -30) && age <= maximumAge;
   }
 
   factory DeviceTelemetry.fromValue(Object? value) {

@@ -13,7 +13,13 @@ class AppTheme {
       useMaterial3: true,
       colorScheme: scheme,
       scaffoldBackgroundColor: scheme.surface,
-      visualDensity: VisualDensity.standard,
+      visualDensity: VisualDensity.compact,
+      pageTransitionsTheme: PageTransitionsTheme(
+        builders: {
+          ...const PageTransitionsTheme().builders,
+          TargetPlatform.android: const StationaryPageTransitionsBuilder(),
+        },
+      ),
       appBarTheme: AppBarTheme(
         backgroundColor: scheme.surface,
         foregroundColor: scheme.onSurface,
@@ -40,4 +46,25 @@ class AppTheme {
       ),
     );
   }
+}
+
+/// Keeps Android pages fixed until navigation completes. The Android manifest
+/// also disables the system's predictive back-to-home animation at the root.
+class StationaryPageTransitionsBuilder extends PageTransitionsBuilder {
+  const StationaryPageTransitionsBuilder();
+
+  @override
+  Duration get transitionDuration => Duration.zero;
+
+  @override
+  Duration get reverseTransitionDuration => Duration.zero;
+
+  @override
+  Widget buildTransitions<T>(
+    PageRoute<T> route,
+    BuildContext context,
+    Animation<double> animation,
+    Animation<double> secondaryAnimation,
+    Widget child,
+  ) => child;
 }
